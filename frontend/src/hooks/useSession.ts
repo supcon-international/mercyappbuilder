@@ -334,6 +334,19 @@ export function useChat(sessionId: string | null) {
               created_at: new Date().toISOString(),
             }]);
           }
+          
+          // Handle heartbeat - update last activity indicator
+          else if (chunkType === 'heartbeat') {
+            const heartbeat = chunk as unknown as { response_length: number; tool_count: number };
+            // Update assistant message with heartbeat info
+            const updated = updateLastAssistantMessage(currentMessages, (msg) => ({
+              // Add a visual indicator that the agent is still working
+              lastHeartbeat: Date.now(),
+              responseLength: heartbeat.response_length,
+              toolCount: heartbeat.tool_count,
+            }));
+            syncToCache(updated);
+          }
         }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {

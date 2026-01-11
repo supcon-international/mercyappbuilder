@@ -380,9 +380,18 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
             <MarkdownContent content={message.content} className="text-sm" />
           )
         ) : isStreaming ? (
-          <div className="flex items-center gap-2">
-            <span className="animate-pulse text-primary">●</span>
-            <span className="text-sm text-muted-foreground">{t('generating')}</span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className="animate-pulse text-primary">●</span>
+              <span className="text-sm text-muted-foreground">{t('generating')}</span>
+            </div>
+            {/* Show activity indicator with stats */}
+            {(message as ChatMessage & { toolCount?: number; responseLength?: number }).toolCount !== undefined && (
+              <div className="text-xs text-muted-foreground/70 pl-4">
+                {(message as ChatMessage & { toolCount?: number }).toolCount} {t('toolCalls')} • 
+                {' '}{Math.round(((message as ChatMessage & { responseLength?: number }).responseLength || 0) / 100) / 10}k chars
+              </div>
+            )}
           </div>
         ) : null}
         

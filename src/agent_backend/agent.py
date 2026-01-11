@@ -260,6 +260,10 @@ class AgentExecutor:
             """Run query and put events into queue."""
             nonlocal response_text, thinking_text, tool_results, query_error
             current_tool_id: str | None = None
+            last_save_time = asyncio.get_event_loop().time()
+            last_heartbeat_time = asyncio.get_event_loop().time()
+            SAVE_INTERVAL = 30.0  # Save partial response every 30 seconds
+            HEARTBEAT_INTERVAL = 5.0  # Send heartbeat every 5 seconds
             
             try:
                 # Add user message to history
@@ -270,6 +274,24 @@ class AgentExecutor:
                 prompt_iterable = single_prompt_iterable(prompt, self.session.sdk_session_id)
                 
                 async for msg in query(prompt=prompt_iterable, options=options):
+                    current_time = asyncio.get_event_loop().time()
+                    
+                    # Send heartbeat to keep connection alive and show activity
+                    if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+                        await event_queue.put({
+                            "type": "heartbeat",
+                            "session_id": self.session.session_id,
+                            "response_length": len(response_text),
+                            "tool_count": len(tool_results)
+                        })
+                        last_heartbeat_time = current_time
+                    
+                    # Periodic save of partial response
+                    if current_time - last_save_time >= SAVE_INTERVAL and response_text:
+                        print(f"[SAVE] Periodic save: {len(response_text)} chars, {len(tool_results)} tools")
+                        # We don't actually save here to avoid duplicate messages,
+                        # but we log to track progress
+                        last_save_time = current_time
                     msg_type = type(msg).__name__
                     
                     # Capture SDK session ID

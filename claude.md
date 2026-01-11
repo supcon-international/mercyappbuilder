@@ -69,10 +69,6 @@ Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED
   - **Write throttling**: update in-memory immediately; persist in batched intervals (e.g., 100–500ms).
   - **Tiny payloads**: events must not store large JSON blobs.
 
-### 5.4 Demo-stability features are required
-- **Export/Import** full state as JSON (including schema version).
-- **Reset**: clear and re-seed mock data in one click.
-
 ---
 
 ## 6) Frontend Architecture Principles (Pure frontend still needs boundaries)
