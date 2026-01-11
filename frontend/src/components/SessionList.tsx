@@ -30,7 +30,7 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
     ? '基于 claude.md 完成应用构建' 
     : 'Build applications based on claude.md';
   const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompt);
-  const [model, setModel] = useState('claude-opus-4-5-20251101');
+  const [model, setModel] = useState('claude-sonnet-4-20250514');
 
   useEffect(() => {
     fetchSessions();
@@ -109,7 +109,7 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                     id="model"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    placeholder="claude-opus-4-5-20251101"
+                    placeholder="claude-sonnet-4-20250514"
                     className="h-9"
                   />
                 </div>
