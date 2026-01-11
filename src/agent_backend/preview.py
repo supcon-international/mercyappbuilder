@@ -159,18 +159,85 @@ class PreviewManager:
             # Dev mode: Start the dev server
             return await self._start_dev_preview(session_id, project_dir, port)
     
+    def _detect_project_type(self, project_dir: str) -> str:
+        """Detect the type of web project."""
+        package_json_path = os.path.join(project_dir, "package.json")
+        vite_config = os.path.join(project_dir, "vite.config.ts")
+        vite_config_js = os.path.join(project_dir, "vite.config.js")
+        index_html = os.path.join(project_dir, "index.html")
+        
+        # Check for Vite
+        if os.path.exists(vite_config) or os.path.exists(vite_config_js):
+            return 'vite'
+        
+        # Check package.json for hints
+        if os.path.exists(package_json_path):
+            try:
+                import json
+                with open(package_json_path, 'r') as f:
+                    pkg = json.load(f)
+                
+                deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
+                scripts = pkg.get('scripts', {})
+                
+                # Check for Vite in dependencies
+                if 'vite' in deps:
+                    return 'vite'
+                
+                # Check for live-server
+                if 'live-server' in deps:
+                    return 'live-server'
+                
+                # Check scripts for hints
+                dev_script = scripts.get('dev', '')
+                if 'vite' in dev_script:
+                    return 'vite'
+                if 'live-server' in dev_script:
+                    return 'live-server'
+                
+                # Check for Next.js
+                if 'next' in deps:
+                    return 'next'
+                
+            except Exception:
+                pass
+        
+        # Fallback: if there's just an index.html, use simple static server
+        if os.path.exists(index_html):
+            return 'static'
+        
+        return 'unknown'
+    
     async def _start_dev_preview(self, session_id: str, project_dir: str, port: int) -> PreviewServer:
         """Start a development preview server."""
         try:
             env = os.environ.copy()
             env['PORT'] = str(port)
             
-            # Start with npm run dev
-            # --host: bind to all interfaces for proxy access
-            # --base: set base URL for correct asset paths through proxy
+            # Detect project type
+            project_type = self._detect_project_type(project_dir)
+            print(f"[PREVIEW] Detected project type: {project_type} for {session_id}")
+            
             base_path = f"/preview/{session_id}/"
+            
+            if project_type == 'vite':
+                # Vite project: use npm run dev with Vite-specific args
+                cmd = ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0", "--base", base_path]
+            elif project_type == 'live-server':
+                # Live-server project: use npx live-server directly
+                cmd = ["npx", "live-server", "--port=" + str(port), "--host=0.0.0.0", "--no-browser"]
+            elif project_type == 'next':
+                # Next.js project
+                cmd = ["npm", "run", "dev", "--", "-p", str(port), "-H", "0.0.0.0"]
+            elif project_type == 'static':
+                # Static HTML: use npx serve
+                cmd = ["npx", "serve", "-l", str(port), "-s", ".", "--cors"]
+            else:
+                # Try generic npm run dev
+                cmd = ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0"]
+            
             process = subprocess.Popen(
-                ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0", "--base", base_path],
+                cmd,
                 cwd=project_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

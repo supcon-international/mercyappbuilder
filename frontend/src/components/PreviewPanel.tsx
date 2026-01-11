@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -81,10 +81,13 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
 
   // Auto-start preview when panel is opened and status is not_started
   const [autoStartAttempted, setAutoStartAttempted] = useState(false);
+  // Track if user manually stopped - don't auto-restart after manual stop
+  const manuallyStoppedRef = useRef(false);
   
   useEffect(() => {
-    // Reset auto-start flag when session changes
+    // Reset flags when session changes
     setAutoStartAttempted(false);
+    manuallyStoppedRef.current = false;
   }, [sessionId]);
   
   useEffect(() => {
@@ -123,13 +126,14 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
     }
   }, [sessionId]);
   
-  // Auto-start preview when panel is opened
+  // Auto-start preview when panel is opened (but not after manual stop)
   useEffect(() => {
     if (
       sessionId && 
       status?.status === 'not_started' && 
       !loading && 
-      !autoStartAttempted
+      !autoStartAttempted &&
+      !manuallyStoppedRef.current  // Don't auto-start if user manually stopped
     ) {
       setAutoStartAttempted(true);
       handleStart();
@@ -139,6 +143,8 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
   const handleStop = async () => {
     if (!sessionId) return;
     setLoading(true);
+    // Mark as manually stopped to prevent auto-restart
+    manuallyStoppedRef.current = true;
     try {
       await api.stopPreview(sessionId);
       setStatus(null);
