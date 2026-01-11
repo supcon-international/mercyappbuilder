@@ -572,7 +572,7 @@ export function ChatPanel({ session }: ChatPanelProps) {
             ) : (
               <>
                 {messages.map((message, index) => (
-                  <MessageBubble key={index} message={message} t={t} locale={locale} />
+                  <MessageBubble key={index} message={message} t={t as (key: string) => string} locale={locale} />
                 ))}
                 
                 {/* Permission request cards */}
@@ -581,7 +581,7 @@ export function ChatPanel({ session }: ChatPanelProps) {
                     key={request.request_id}
                     request={request}
                     onRespond={respondToPermission}
-                    t={t}
+                    t={t as (key: string) => string}
                   />
                 ))}
               </>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { api, type PermissionRequest } from '@/lib/api';
 import type { Session, ChatMessage, CreateSessionRequest, ToolUse } from '@/types';
 
@@ -240,7 +240,7 @@ export function useChat(sessionId: string | null) {
 
       try {
         for await (const chunk of api.streamMessage(sessionId, content, abortController.signal)) {
-          const chunkType = chunk.type;
+          const chunkType: string = chunk.type;
           
           // Get current messages from cache (in case user switched and came back)
           const currentMessages = messageCache.get(sessionId) || [];
@@ -314,10 +314,10 @@ export function useChat(sessionId: string | null) {
           
           // Handle tool use end
           else if (chunkType === 'tool_use_end') {
-            const updated = updateLastAssistantMessage(currentMessages, (msg) => {
+            const updated = updateLastAssistantMessage(currentMessages, () => ({
               // Tool execution complete, waiting for result
-              return { currentTool: undefined };
-            });
+              currentTool: '',
+            }));
             syncToCache(updated);
           }
           
@@ -383,7 +383,7 @@ export function useChat(sessionId: string | null) {
           else if (chunkType === 'heartbeat') {
             const heartbeat = chunk as unknown as { response_length: number; tool_count: number };
             // Update assistant message with heartbeat info
-            const updated = updateLastAssistantMessage(currentMessages, (msg) => ({
+            const updated = updateLastAssistantMessage(currentMessages, () => ({
               // Add a visual indicator that the agent is still working
               lastHeartbeat: Date.now(),
               responseLength: heartbeat.response_length,

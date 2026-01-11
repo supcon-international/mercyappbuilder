@@ -2,13 +2,16 @@
 
 import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .agent import AgentExecutor
 from .models import (
@@ -24,9 +27,12 @@ from .preview import get_preview_manager, PreviewManager
 
 # Port configuration
 API_PORT = 8000
-FRONTEND_PORT = 5173
 PREVIEW_PORT_START = 4001
 PREVIEW_PORT_END = 4100
+
+# Static files directory (built frontend)
+FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
+USE_STATIC_FRONTEND = FRONTEND_DIST_DIR.exists()
 
 # Global session manager
 session_manager: SessionManager | None = None
@@ -43,7 +49,11 @@ async def lifespan(app: FastAPI):
     print("  Tier0 Appbuilder - Backend Server")
     print("=" * 60)
     print(f"  API Server:      http://localhost:{API_PORT}")
-    print(f"  Frontend:        http://localhost:{FRONTEND_PORT}")
+    if USE_STATIC_FRONTEND:
+        print(f"  Frontend:        Built static files (embedded)")
+        print(f"  Static Dir:      {FRONTEND_DIST_DIR}")
+    else:
+        print(f"  Frontend:        Development mode (needs npm run dev)")
     print(f"  Preview Ports:   {PREVIEW_PORT_START}-{PREVIEW_PORT_END}")
     print(f"  Preview Proxy:   /preview/{{session_id}}/")
     print("=" * 60 + "\n")
@@ -390,12 +400,14 @@ async def clear_session_history(session_id: str) -> dict:
 # ============================================================================
 
 @app.post("/sessions/{session_id}/preview/start", tags=["Preview"])
-async def start_preview(session_id: str, request: Request) -> dict:
+async def start_preview(session_id: str, request: Request, mode: str = 'dev') -> dict:
     """
-    Start a preview dev server for the session's web project.
+    Start a preview server for the session's web project.
     
-    Looks for a web project (package.json) in the session's working directory
-    and starts an npm dev server on an available port.
+    Looks for a web project (package.json) in the session's working directory.
+    
+    Args:
+        mode: 'dev' for development server (with HMR), 'build' for production build + static server
     """
     manager = get_session_manager()
     session = await manager.get_session(session_id)
@@ -403,8 +415,11 @@ async def start_preview(session_id: str, request: Request) -> dict:
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     
+    if mode not in ('dev', 'build'):
+        raise HTTPException(status_code=400, detail="Mode must be 'dev' or 'build'")
+    
     preview_mgr = get_preview_manager()
-    server = await preview_mgr.start_preview(session_id, session.working_directory)
+    server = await preview_mgr.start_preview(session_id, session.working_directory, mode=mode)
     
     # Use relative path for proxy URL (works with any domain/protocol)
     proxy_url = f"/preview/{session_id}/" if server.status == 'running' else None
@@ -416,7 +431,9 @@ async def start_preview(session_id: str, request: Request) -> dict:
         'local_url': f'http://localhost:{server.port}' if server.status == 'running' else None,
         'project_dir': server.project_dir,
         'status': server.status,
-        'error': server.error
+        'mode': server.mode,
+        'error': server.error,
+        'verified_port': server.verified_port
     }
 
 
@@ -608,58 +625,61 @@ async def api_prefix_handler(path: str, request: Request) -> Response:
 
 
 # ============================================================================
-# Frontend Proxy (for single-port deployment via Cloudflare Tunnel)
+# Frontend Static Files (Production Mode)
 # ============================================================================
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["Frontend"])
-async def proxy_frontend(path: str, request: Request) -> Response:
-    """
-    Proxy all non-API requests to the frontend dev server.
-    This enables single-port deployment through Cloudflare Tunnel.
-    """
-    # Skip if path starts with API routes (already handled above)
-    if path.startswith(('sessions', 'health', 'preview/', 'api/')):
-        raise HTTPException(status_code=404, detail="Not found")
-    
-    frontend_url = f"http://localhost:{FRONTEND_PORT}/{path}"
-    
-    # Include query string
-    if request.url.query:
-        frontend_url += f"?{request.url.query}"
-    
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Forward the request
-            response = await client.request(
-                method=request.method,
-                url=frontend_url,
-                headers={k: v for k, v in request.headers.items() 
-                        if k.lower() not in ('host', 'content-length')},
-                content=await request.body() if request.method in ('POST', 'PUT', 'PATCH') else None,
-            )
-            
-            # Build response headers
-            response_headers = dict(response.headers)
-            response_headers.pop('content-encoding', None)
-            response_headers.pop('transfer-encoding', None)
-            response_headers.pop('content-length', None)
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=response_headers,
-                media_type=response.headers.get('content-type'),
-            )
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Frontend server not available")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Frontend server timeout")
+def serve_frontend_index() -> HTMLResponse:
+    """Serve the frontend index.html file."""
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.exists():
+        return HTMLResponse(content=index_file.read_text(), status_code=200)
+    raise HTTPException(status_code=404, detail="Frontend not built")
 
 
 @app.get("/", tags=["Frontend"])
-async def proxy_frontend_root(request: Request) -> Response:
-    """Proxy root path to frontend."""
-    return await proxy_frontend("", request)
+async def serve_root():
+    """Serve the frontend root."""
+    if USE_STATIC_FRONTEND:
+        return serve_frontend_index()
+    # Fallback: return simple message if no frontend
+    return {"message": "Tier0 Appbuilder API", "docs": "/docs"}
+
+
+@app.get("/{path:path}", tags=["Frontend"])
+async def serve_frontend(path: str, request: Request):
+    """
+    Serve static frontend files or fallback to index.html for SPA routing.
+    """
+    if not USE_STATIC_FRONTEND:
+        raise HTTPException(status_code=404, detail="Frontend not available in dev mode")
+    
+    # Skip API routes (already handled by other endpoints)
+    if path.startswith(('sessions', 'health', 'preview', 'api', 'docs', 'openapi.json')):
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    # Check if file exists in dist
+    file_path = FRONTEND_DIST_DIR / path
+    
+    if file_path.exists() and file_path.is_file():
+        # Determine content type
+        suffix = file_path.suffix.lower()
+        content_types = {
+            '.html': 'text/html',
+            '.js': 'application/javascript',
+            '.css': 'text/css',
+            '.json': 'application/json',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.ico': 'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+        }
+        media_type = content_types.get(suffix, 'application/octet-stream')
+        return FileResponse(file_path, media_type=media_type)
+    
+    # For SPA: if path doesn't exist, serve index.html
+    # This allows client-side routing to work
+    return serve_frontend_index()
 
 
 # ============================================================================

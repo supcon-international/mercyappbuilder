@@ -18,6 +18,9 @@ export interface ToolUse {
   tool: string;
   input: Record<string, unknown>;
   result?: string;
+  id?: string;
+  inputRaw?: string;
+  status?: 'running' | 'done';
 }
 
 export interface ChatMessage {
@@ -27,16 +30,24 @@ export interface ChatMessage {
   tool_use?: ToolUse[];
   thinking?: string;
   isStreaming?: boolean;
+  // Streaming metadata
+  currentTool?: string;
+  lastHeartbeat?: number;
+  responseLength?: number;
+  toolCount?: number;
 }
 
 export interface StreamChunk {
   type: 'text' | 'text_delta' | 'thinking' | 'thinking_delta' | 'thinking_start' | 
         'tool_use' | 'tool_use_start' | 'tool_use_end' | 'tool_input_delta' |
-        'tool_result' | 'done' | 'error';
+        'tool_result' | 'done' | 'error' | 'permission_request' | 'heartbeat';
   content: string | ToolUse | { tool: string; id: string } | { id: string };
   session_id: string;
   is_complete?: boolean;
   tool_id?: string;
+  // Heartbeat fields
+  response_length?: number;
+  tool_count?: number;
 }
 
 export interface SendMessageRequest {
