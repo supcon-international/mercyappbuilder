@@ -124,9 +124,12 @@ class PreviewManager:
                 env = os.environ.copy()
                 env['PORT'] = str(port)
                 
-                # Try to start with npm run dev (add --host for Vite compatibility)
+                # Try to start with npm run dev
+                # --host: bind to all interfaces for proxy access
+                # --base: set base URL for correct asset paths through proxy
+                base_path = f"/preview/{session_id}/"
                 process = subprocess.Popen(
-                    ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0"],
+                    ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0", "--base", base_path],
                     cwd=project_dir,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

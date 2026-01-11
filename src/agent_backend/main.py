@@ -480,7 +480,8 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
     if not port:
         raise HTTPException(status_code=503, detail="Preview server port not available")
     
-    target_url = f"http://localhost:{port}/{path}"
+    # Vite is started with --base=/preview/{session_id}/, so include full path
+    target_url = f"http://localhost:{port}/preview/{session_id}/{path}"
     
     # Forward query parameters
     if request.query_params:
@@ -518,20 +519,7 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
             content = response.content
             content_type = response.headers.get('content-type', '')
             
-            # For HTML responses, inject <base> tag to fix relative paths
-            if 'text/html' in content_type:
-                try:
-                    html = content.decode('utf-8')
-                    base_url = f"/preview/{session_id}/"
-                    # Inject base tag after <head>
-                    if '<head>' in html:
-                        html = html.replace('<head>', f'<head><base href="{base_url}">', 1)
-                    elif '<HEAD>' in html:
-                        html = html.replace('<HEAD>', f'<HEAD><base href="{base_url}">', 1)
-                    content = html.encode('utf-8')
-                    response_headers['content-length'] = str(len(content))
-                except Exception:
-                    pass  # If injection fails, return original content
+            # Note: Vite's --base flag handles path rewriting, no injection needed
             
             return Response(
                 content=content,
