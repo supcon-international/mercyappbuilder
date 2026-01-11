@@ -464,6 +464,7 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
     
     This allows accessing preview servers through the main API port,
     enabling public access when the API is exposed via tunnel.
+    Injects <base> tag in HTML responses to fix relative paths.
     """
     preview_mgr = get_preview_manager()
     status = await preview_mgr.get_status(session_id)
@@ -510,11 +511,29 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
                 if key.lower() not in skip_response_headers:
                     response_headers[key] = value
             
+            content = response.content
+            content_type = response.headers.get('content-type', '')
+            
+            # For HTML responses, inject <base> tag to fix relative paths
+            if 'text/html' in content_type:
+                try:
+                    html = content.decode('utf-8')
+                    base_url = f"/preview/{session_id}/"
+                    # Inject base tag after <head>
+                    if '<head>' in html:
+                        html = html.replace('<head>', f'<head><base href="{base_url}">', 1)
+                    elif '<HEAD>' in html:
+                        html = html.replace('<HEAD>', f'<HEAD><base href="{base_url}">', 1)
+                    content = html.encode('utf-8')
+                    response_headers['content-length'] = str(len(content))
+                except Exception:
+                    pass  # If injection fails, return original content
+            
             return Response(
-                content=response.content,
+                content=content,
                 status_code=response.status_code,
                 headers=response_headers,
-                media_type=response.headers.get('content-type'),
+                media_type=content_type or None,
             )
     except httpx.ConnectError:
         raise HTTPException(status_code=503, detail="Cannot connect to preview server")

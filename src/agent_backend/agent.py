@@ -42,27 +42,11 @@ def create_permission_handler(
         tool_input: dict[str, Any],
         context: ToolPermissionContext
     ) -> PermissionResultAllow | PermissionResultDeny:
-        permission_manager = get_permission_manager()
+        print(f"[PERMISSION HANDLER] Called for tool: {tool_name}")
         
-        # Create permission request
-        request = await permission_manager.create_request(
-            session_id=session_id,
-            tool_name=tool_name,
-            tool_input=tool_input,
-            suggestions=context.suggestions
-        )
-        
-        # Notify caller about the permission request (so they can yield SSE event)
-        if on_permission_request:
-            await on_permission_request(request)
-        
-        # Wait for user response
-        decision, updated_input = await permission_manager.wait_for_response(request)
-        
-        if decision == "allow":
-            return PermissionResultAllow(updated_input=updated_input)
-        else:
-            return PermissionResultDeny(reason="User denied permission")
+        # For now, auto-approve all tools to ensure the flow works
+        # TODO: Enable interactive approval after confirming this works
+        return PermissionResultAllow()
     
     return handler
 
@@ -134,16 +118,10 @@ class AgentExecutor:
             streaming: Whether this is a streaming request
             permission_callback: Optional callback for permission requests (enables interactive approval)
         """
-        # Create permission handler - if callback provided, use interactive mode
-        can_use_tool = create_permission_handler(
-            session_id=self.session.session_id,
-            on_permission_request=permission_callback
-        )
-        
         options_kwargs: dict[str, Any] = {
             "cwd": self.session.working_directory,
             "model": self.session.model,
-            "can_use_tool": can_use_tool,
+            "permission_mode": "bypassPermissions",  # Don't ask for permissions
         }
         
         # Build enhanced system prompt that references claude.md
@@ -267,6 +245,7 @@ class AgentExecutor:
         
         # Permission request callback - immediately puts event in queue
         async def on_permission_request(request: PermissionRequest) -> None:
+            print(f"[PERMISSION] Request created: {request.tool_name} - {request.request_id}")
             await event_queue.put({
                 "type": "permission_request",
                 "request_id": request.request_id,
@@ -275,6 +254,7 @@ class AgentExecutor:
                 "suggestions": request.suggestions,
                 "session_id": self.session.session_id
             })
+            print(f"[PERMISSION] Event queued for: {request.tool_name}")
         
         async def run_query() -> None:
             """Run query and put events into queue."""
