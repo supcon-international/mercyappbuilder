@@ -406,12 +406,8 @@ async def start_preview(session_id: str, request: Request) -> dict:
     preview_mgr = get_preview_manager()
     server = await preview_mgr.start_preview(session_id, session.working_directory)
     
-    # Build proxy URL based on request origin
-    proxy_url = None
-    if server.status == 'running':
-        # Use proxy path for public access
-        base_url = str(request.base_url).rstrip('/')
-        proxy_url = f"{base_url}/preview/{session_id}/"
+    # Use relative path for proxy URL (works with any domain/protocol)
+    proxy_url = f"/api/preview/{session_id}/" if server.status == 'running' else None
     
     return {
         'session_id': server.session_id,
@@ -453,10 +449,9 @@ async def get_preview_status(session_id: str, request: Request) -> dict:
             'error': None
         }
     
-    # Add proxy URL for public access
+    # Use relative path for proxy URL (works with any domain/protocol)
     if status.get('status') == 'running':
-        base_url = str(request.base_url).rstrip('/')
-        status['url'] = f"{base_url}/preview/{session_id}/"
+        status['url'] = f"/api/preview/{session_id}/"
         status['local_url'] = f"http://localhost:{status.get('port')}"
     
     return status
