@@ -569,6 +569,61 @@ async def health_check() -> dict:
 
 
 # ============================================================================
+# Frontend Proxy (for single-port deployment via Cloudflare Tunnel)
+# ============================================================================
+
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["Frontend"])
+async def proxy_frontend(path: str, request: Request) -> Response:
+    """
+    Proxy all non-API requests to the frontend dev server.
+    This enables single-port deployment through Cloudflare Tunnel.
+    """
+    # Skip if path starts with API routes (already handled above)
+    if path.startswith(('sessions', 'health', 'preview/', 'api/')):
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    frontend_url = f"http://localhost:{FRONTEND_PORT}/{path}"
+    
+    # Include query string
+    if request.url.query:
+        frontend_url += f"?{request.url.query}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Forward the request
+            response = await client.request(
+                method=request.method,
+                url=frontend_url,
+                headers={k: v for k, v in request.headers.items() 
+                        if k.lower() not in ('host', 'content-length')},
+                content=await request.body() if request.method in ('POST', 'PUT', 'PATCH') else None,
+            )
+            
+            # Build response headers
+            response_headers = dict(response.headers)
+            response_headers.pop('content-encoding', None)
+            response_headers.pop('transfer-encoding', None)
+            response_headers.pop('content-length', None)
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=response_headers,
+                media_type=response.headers.get('content-type'),
+            )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Frontend server not available")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Frontend server timeout")
+
+
+@app.get("/", tags=["Frontend"])
+async def proxy_frontend_root(request: Request) -> Response:
+    """Proxy root path to frontend."""
+    return await proxy_frontend("", request)
+
+
+# ============================================================================
 # CLI Entry Point
 # ============================================================================
 
