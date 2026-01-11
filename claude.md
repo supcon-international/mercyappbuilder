@@ -1,6 +1,17 @@
 # claude.md — Manufacturing Web App (Pure Frontend + localStorage, Seeded Mock Data Only)
 To avoid wasting time and tokens, prefer **installing and importing** proven frameworks and base components instead of generating large amounts of boilerplate code.
 
+## Framework & UI Baseline (Mandatory)
+- Use **Vite + React + TypeScript** as the project framework (no Next.js).
+- Use **TailwindCSS + shadcn/ui** for base UI components. Do not hand-roll foundational components.
+- Prefer adding components via the **shadcn CLI** and importing them, rather than generating custom equivalents.
+
+### Dependency-First Output (Mandatory)
+- Start with **install commands** for Vite/Tailwind/shadcn and any minimal utilities.
+- Prefer **small targeted patches** over dumping full files.
+- Do not generate base components (Button, Dialog, Table, Toast, etc.). Use **shadcn/ui** components.
+
+
 Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED1D** as the primary accent, and has a **right-side module navigation rail**. The app must be **data-driven with real logic** (not static UI), while remaining **pure frontend / single-process**: everything runs in the browser and persists to `localStorage`.
 
 **Hard constraint:** all data is **mock/seeded**. **No real-time feeds, no live integrations, no external APIs, no device connections.**  

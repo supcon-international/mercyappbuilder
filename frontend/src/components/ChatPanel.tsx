@@ -28,6 +28,101 @@ interface ExtendedTool extends ToolUse {
   status?: 'running' | 'done';
 }
 
+// Todo item from TodoWrite tool
+interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  id?: string;
+}
+
+// Extract the latest todos from tool_use array
+function extractLatestTodos(tools: ToolUse[]): TodoItem[] | null {
+  // Find the last TodoWrite tool
+  for (let i = tools.length - 1; i >= 0; i--) {
+    const tool = tools[i];
+    if (tool.tool === 'TodoWrite' && tool.input?.todos) {
+      return tool.input.todos as TodoItem[];
+    }
+  }
+  return null;
+}
+
+// Todo list display component
+function TodoListDisplay({ todos, t }: { todos: TodoItem[]; t: (key: string) => string }) {
+  const completedCount = todos.filter(t => t.status === 'completed').length;
+  const inProgressItem = todos.find(t => t.status === 'in_progress');
+  const progress = Math.round((completedCount / todos.length) * 100);
+  
+  return (
+    <div className="mt-3 p-3 bg-muted/30 rounded-lg border border-border/30">
+      {/* Header with progress */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 11l3 3L22 4"/>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+          {t('taskProgress')}
+        </span>
+        <Badge variant="outline" className="text-xs h-5 px-2">
+          {completedCount}/{todos.length}
+        </Badge>
+      </div>
+      
+      {/* Progress bar */}
+      <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-3">
+        <div 
+          className="h-full bg-primary transition-all duration-500 ease-out"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      
+      {/* Current task highlight */}
+      {inProgressItem && (
+        <div className="flex items-center gap-2 p-2 bg-primary/10 rounded-md mb-2 text-sm">
+          <span className="animate-pulse text-primary">●</span>
+          <span className="text-primary font-medium truncate">{inProgressItem.content}</span>
+        </div>
+      )}
+      
+      {/* Todo list */}
+      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+        {todos.map((todo, index) => (
+          <div 
+            key={todo.id || index}
+            className={`flex items-start gap-2 text-xs py-1 px-1.5 rounded transition-colors ${
+              todo.status === 'completed' ? 'text-muted-foreground' :
+              todo.status === 'in_progress' ? 'text-foreground bg-accent/30' :
+              'text-muted-foreground'
+            }`}
+          >
+            {/* Checkbox */}
+            <div className={`w-4 h-4 flex-shrink-0 rounded border mt-0.5 flex items-center justify-center ${
+              todo.status === 'completed' ? 'bg-primary border-primary' :
+              todo.status === 'in_progress' ? 'border-primary animate-pulse' :
+              'border-muted-foreground/40'
+            }`}>
+              {todo.status === 'completed' && (
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              )}
+              {todo.status === 'in_progress' && (
+                <div className="w-2 h-2 bg-primary rounded-full" />
+              )}
+            </div>
+            
+            {/* Content */}
+            <span className={todo.status === 'completed' ? 'line-through' : ''}>
+              {todo.content}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Tool call display component - shows tool name, status, and collapsible details
 function ToolCallDisplay({ tool, isActive, t }: { tool: ExtendedTool; isActive?: boolean; t: (key: string) => string }) {
   const [isOpen, setIsOpen] = useState(isActive); // Auto-open when active
@@ -462,6 +557,14 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
             t={t} 
           />
         )}
+        
+        {/* Todo list from TodoWrite tool */}
+        {!isUser && message.tool_use && (() => {
+          const todos = extractLatestTodos(message.tool_use);
+          return todos && todos.length > 0 ? (
+            <TodoListDisplay todos={todos} t={t} />
+          ) : null;
+        })()}
         
         {/* Timestamp and status */}
         <div className={`text-xs mt-3 flex items-center justify-between ${isUser ? 'text-primary-foreground/60' : 'text-muted-foreground/60'}`}>

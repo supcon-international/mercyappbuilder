@@ -52,31 +52,69 @@ class PreviewManager:
                 return port
         raise RuntimeError("No available ports for preview server")
     
+    def _has_dev_script(self, project_dir: str) -> bool:
+        """Check if package.json has a dev script or is a valid project."""
+        import json
+        package_json_path = os.path.join(project_dir, "package.json")
+        if not os.path.exists(package_json_path):
+            return False
+        try:
+            with open(package_json_path, 'r') as f:
+                pkg = json.load(f)
+            scripts = pkg.get('scripts', {})
+            # Check for dev, start, or serve scripts
+            if any(key in scripts for key in ('dev', 'start', 'serve')):
+                return True
+            # Also check for vite in devDependencies (can run npx vite)
+            deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
+            if 'vite' in deps:
+                return True
+            return False
+        except Exception:
+            return False
+    
     def _find_project_dir(self, working_directory: str) -> Optional[str]:
         """Find the web project directory within the session's working directory."""
-        # Check common locations first
-        candidates = [
-            os.path.join(working_directory, "web"),
-            os.path.join(working_directory, "frontend"),
-            os.path.join(working_directory, "app"),
-            working_directory,  # Fallback to root
-        ]
+        import json
         
-        for candidate in candidates:
-            package_json = os.path.join(candidate, "package.json")
-            if os.path.exists(package_json):
-                return candidate
+        # Collect all candidates with priority
+        candidates = []
         
-        # Search for package.json in any subdirectory (one level deep)
+        # Priority 1: Common subdirectory names
+        for subdir in ["web", "frontend", "app"]:
+            path = os.path.join(working_directory, subdir)
+            if os.path.exists(os.path.join(path, "package.json")):
+                candidates.append(path)
+        
+        # Priority 2: Any subdirectory with package.json (one level deep)
         try:
             for item in os.listdir(working_directory):
                 item_path = os.path.join(working_directory, item)
-                if os.path.isdir(item_path) and not item.startswith('.'):
-                    package_json = os.path.join(item_path, "package.json")
-                    if os.path.exists(package_json):
-                        return item_path
+                if os.path.isdir(item_path) and not item.startswith('.') and item not in ["node_modules"]:
+                    if os.path.exists(os.path.join(item_path, "package.json")):
+                        if item_path not in candidates:
+                            candidates.append(item_path)
         except Exception:
             pass
+        
+        # Priority 3: Root directory
+        if os.path.exists(os.path.join(working_directory, "package.json")):
+            candidates.append(working_directory)
+        
+        # First, try to find a directory with dev script
+        for candidate in candidates:
+            if self._has_dev_script(candidate):
+                return candidate
+        
+        # Fallback: return first candidate with package.json, even without dev script
+        # (might be a static project that can use npx serve)
+        for candidate in candidates:
+            if os.path.exists(os.path.join(candidate, "package.json")):
+                return candidate
+        
+        # Last fallback: check for index.html in root (static site)
+        if os.path.exists(os.path.join(working_directory, "index.html")):
+            return working_directory
         
         return None
     

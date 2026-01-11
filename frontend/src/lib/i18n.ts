@@ -45,6 +45,7 @@ export const translations = {
     completed: '已完成',
     toolCalls: '个工具调用',
     result: '结果',
+    taskProgress: '任务进度',
     
     // Thinking
     thinkingProcess: '思考过程',
@@ -120,6 +121,7 @@ export const translations = {
     completed: 'Completed',
     toolCalls: 'tool calls',
     result: 'Result',
+    taskProgress: 'Task Progress',
     
     // Thinking
     thinkingProcess: 'Thinking Process',
