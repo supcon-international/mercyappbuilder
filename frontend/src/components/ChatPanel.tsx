@@ -21,32 +21,101 @@ interface ChatPanelProps {
   session: Session | null;
 }
 
-// Tool progress indicator component
+// Tool call display component - shows tool name, status, and collapsible details
+function ToolCallDisplay({ tool, isActive, t }: { tool: ToolUse & { id?: string }; isActive?: boolean; t: (key: string) => string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const hasResult = !!tool.result;
+  
+  // Format input for display
+  const inputDisplay = tool.input ? JSON.stringify(tool.input, null, 2) : '';
+  const truncatedInput = inputDisplay.length > 200 ? inputDisplay.slice(0, 200) + '...' : inputDisplay;
+  
+  // Truncate result
+  const resultDisplay = tool.result || '';
+  const truncatedResult = resultDisplay.length > 300 ? resultDisplay.slice(0, 300) + '...' : resultDisplay;
+  
+  return (
+    <div className="border border-border/50 rounded-lg overflow-hidden bg-muted/30 text-xs">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors text-left"
+      >
+        <span className={isActive ? 'animate-spin' : ''}>
+          {isActive ? '⚙️' : hasResult ? '✅' : '⏳'}
+        </span>
+        <span className="font-medium text-foreground flex-1 truncate">{tool.tool}</span>
+        <span className="text-muted-foreground">{isOpen ? '▼' : '▶'}</span>
+      </button>
+      
+      {isOpen && (
+        <div className="border-t border-border/30 px-3 py-2 space-y-2 bg-background/50">
+          {inputDisplay && (
+            <div>
+              <div className="text-muted-foreground mb-1">{t('parameters')}:</div>
+              <pre className="bg-muted/50 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                {truncatedInput}
+              </pre>
+            </div>
+          )}
+          {hasResult && (
+            <div>
+              <div className="text-muted-foreground mb-1">{t('result')}:</div>
+              <pre className="bg-muted/50 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+                {truncatedResult}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Tool progress indicator component - summary + expandable list
 function ToolProgressIndicator({ tools, isStreaming, t }: { tools: ToolUse[]; isStreaming?: boolean; t: (key: string) => string }) {
+  const [showAll, setShowAll] = useState(false);
+  
   if (!tools || tools.length === 0) return null;
   
   const completedCount = tools.filter(t => t.result).length;
-  const currentTool = tools.find(t => !t.result) || tools[tools.length - 1];
+  const currentToolIndex = tools.findIndex(t => !t.result);
   const allDone = completedCount === tools.length;
   
   return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-      {isStreaming && !allDone ? (
-        <>
-          <span className="animate-spin">⚙️</span>
-          <span className="text-foreground font-medium">{currentTool.tool}</span>
-          <span>{t('executing')}</span>
-          {tools.length > 1 && (
-            <span className="text-muted-foreground">
-              ({completedCount + 1}/{tools.length})
-            </span>
-          )}
-        </>
-      ) : (
-        <>
-          <span>✅</span>
-          <span>{t('completed')} {completedCount} {t('toolCalls')}</span>
-        </>
+    <div className="mt-2 space-y-2">
+      {/* Summary line */}
+      <button 
+        onClick={() => setShowAll(!showAll)}
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {isStreaming && !allDone ? (
+          <>
+            <span className="animate-spin">⚙️</span>
+            <span className="text-foreground font-medium">{tools[currentToolIndex]?.tool}</span>
+            <span>{t('executing')}</span>
+            <span>({completedCount + 1}/{tools.length})</span>
+          </>
+        ) : (
+          <>
+            <span>✅</span>
+            <span>{t('completed')} {completedCount} {t('toolCalls')}</span>
+          </>
+        )}
+        <span className="ml-auto">{showAll ? '▼' : '▶'}</span>
+      </button>
+      
+      {/* Expandable tool list */}
+      {showAll && (
+        <div className="space-y-1.5 pl-1">
+          {tools.map((tool, index) => (
+            <ToolCallDisplay 
+              key={tool.id || index} 
+              tool={tool}
+              isActive={isStreaming && index === currentToolIndex}
+              t={t}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -272,15 +341,15 @@ function MarkdownContent({ content, className }: { content: string; className?: 
   );
 }
 
-// Message bubble component - Clean Room Style with animations
+// Message bubble component - Clean Room Style with animations - Responsive
 function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: string) => string; locale: string }) {
   const isUser = message.role === 'user';
   const isStreaming = message.isStreaming;
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 message-bubble`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3 sm:mb-4 message-bubble`}>
       <div
-        className={`max-w-[80%] rounded-2xl p-4 transition-all duration-300 ${
+        className={`max-w-[90%] sm:max-w-[80%] rounded-xl sm:rounded-2xl p-3 sm:p-4 transition-all duration-300 ${
           isUser
             ? 'bg-primary text-primary-foreground shadow-sm hover:shadow-md hover:shadow-primary/20'
             : 'bg-card border border-border/50 shadow-sm hover:shadow-md hover:border-primary/20'
@@ -383,19 +452,21 @@ export function ChatPanel({ session }: ChatPanelProps) {
 
   return (
     <Card className="h-full flex flex-col gap-0 py-0 overflow-hidden border-border/50 shadow-sm card-hover">
-      <CardHeader className="py-2.5 px-4 flex-shrink-0 border-b border-border/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-sm font-medium">{t('conversation')}</CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate max-w-[400px] opacity-70">
+      <CardHeader className="py-2 sm:py-2.5 px-3 sm:px-4 flex-shrink-0 border-b border-border/30">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-xs sm:text-sm font-medium">{t('conversation')}</CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate opacity-70">
               {session.working_directory.split('/').slice(-2).join('/')}
             </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Badge variant="secondary" className="text-xs rounded-lg font-normal h-5 px-2">{session.model.split('-').slice(0,2).join('-')}</Badge>
+          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+            <Badge variant="secondary" className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2 hidden sm:inline-flex">
+              {session.model.split('-').slice(0,2).join('-')}
+            </Badge>
             <Badge
               variant={session.status === 'active' ? 'default' : 'secondary'}
-              className="text-xs rounded-lg font-normal h-5 px-2"
+              className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2"
             >
               {session.status}
             </Badge>
@@ -405,7 +476,7 @@ export function ChatPanel({ session }: ChatPanelProps) {
       <Separator className="flex-shrink-0" />
       <CardContent className="flex-1 p-0 flex flex-col min-h-0 overflow-hidden">
         <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
-          <div className="p-4">
+          <div className="p-2 sm:p-4">
             {messages.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                 <div className="text-center">
@@ -440,14 +511,14 @@ export function ChatPanel({ session }: ChatPanelProps) {
           </div>
         )}
         
-        <div className="p-3 border-t border-border/30 flex-shrink-0 bg-card/50 backdrop-blur-sm">
-          <form onSubmit={handleSubmit} className="flex gap-2">
+        <div className="p-2 sm:p-3 border-t border-border/30 flex-shrink-0 bg-card/50 backdrop-blur-sm">
+          <form onSubmit={handleSubmit} className="flex gap-1.5 sm:gap-2">
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t('inputPlaceholder')}
-              className="min-h-[48px] max-h-[100px] resize-none rounded-xl border-border/50 bg-background/80 focus:bg-background transition-all duration-300 input-glow text-sm"
+              className="min-h-[40px] sm:min-h-[48px] max-h-[80px] sm:max-h-[100px] resize-none rounded-xl border-border/50 bg-background/80 focus:bg-background transition-all duration-300 input-glow text-sm"
               disabled={loading || streaming || session.status === 'closed'}
             />
             <div className="flex flex-col justify-end">

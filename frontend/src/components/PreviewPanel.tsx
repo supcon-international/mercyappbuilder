@@ -153,14 +153,14 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
 
   return (
     <Card className="h-full flex flex-col gap-0 py-0 overflow-hidden border-border/50 shadow-sm card-hover">
-      <CardHeader className="py-2.5 px-3 flex-shrink-0 border-b border-border/30">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <CardTitle className="text-sm font-medium">{t('preview')}</CardTitle>
+      <CardHeader className="py-2 sm:py-2.5 px-2 sm:px-3 flex-shrink-0 border-b border-border/30">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 flex-1">
+            <CardTitle className="text-xs sm:text-sm font-medium">{t('preview')}</CardTitle>
             {status && (
               <Badge
                 variant={isRunning ? 'default' : isStarting ? 'secondary' : 'outline'}
-                className="text-xs rounded-lg font-normal h-5 px-2"
+                className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2"
               >
                 {status.status === 'running' && t('running')}
                 {status.status === 'starting' && t('starting')}
@@ -170,22 +170,22 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
               </Badge>
             )}
             {status?.port && (
-              <span className="text-xs text-muted-foreground font-mono">
+              <span className="text-xs text-muted-foreground font-mono hidden sm:inline">
                 :{status.port}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
             {isRunning && (
               <>
-                <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-7 w-7 p-0 rounded-lg" title="Refresh">
+                <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-6 w-6 sm:h-7 sm:w-7 p-0 rounded-lg" title="Refresh">
                   <RefreshIcon />
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => window.open(status?.url || '', '_blank')}
-                  className="h-7 w-7 p-0 rounded-lg"
+                  className="h-6 w-6 sm:h-7 sm:w-7 p-0 rounded-lg"
                   title="Open in new window"
                 >
                   <ExternalLinkIcon />
@@ -198,13 +198,13 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
                 size="sm"
                 onClick={handleStop}
                 disabled={loading}
-                className="h-7 rounded-lg px-2.5 text-xs btn-glow flex items-center gap-1"
+                className="h-6 sm:h-7 rounded-lg px-1.5 sm:px-2.5 text-xs btn-glow flex items-center gap-0.5 sm:gap-1"
               >
                 <StopIcon />
-                {t('stop')}
+                <span className="hidden sm:inline">{t('stop')}</span>
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={onClose} className="h-7 w-7 p-0 rounded-lg transition-transform duration-200 hover:scale-110 hover:rotate-90">
+            <Button variant="ghost" size="sm" onClick={onClose} className="h-6 w-6 sm:h-7 sm:w-7 p-0 rounded-lg transition-transform duration-200 hover:scale-110 hover:rotate-90">
               <CloseIcon />
             </Button>
           </div>

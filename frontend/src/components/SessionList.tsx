@@ -86,14 +86,14 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 pb-3">
+      <div className="p-3 sm:p-4 pb-2 sm:pb-3">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('sessions')}</h2>
           <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm" className="rounded-lg h-7 px-2.5 text-xs font-medium btn-glow">{t('newSession')}</Button>
+              <Button size="sm" className="rounded-lg h-7 px-2 sm:px-2.5 text-xs font-medium btn-glow">{t('newSession')}</Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="w-[95vw] max-w-md mx-auto">
               <DialogHeader>
                 <DialogTitle>{t('createSession')}</DialogTitle>
                 <DialogDescription>
@@ -145,7 +145,7 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
           </div>
         )}
         <ScrollArea className="h-full">
-          <div className="px-3 pb-3 space-y-1">
+          <div className="px-2 sm:px-3 pb-3 space-y-1">
             {sessions.length === 0 ? (
               <div className="py-12 text-center text-muted-foreground text-sm">
                 <div className="text-3xl mb-3 opacity-50 transition-transform duration-300 hover:scale-125 cursor-default">💬</div>
