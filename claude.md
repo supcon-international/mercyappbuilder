@@ -83,7 +83,7 @@ Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED
 - Right-side nav rail: fixed, collapsible; active state clearly highlighted with #B2ED1D.
 - Dark surfaces + high contrast + clear focus rings (keyboard-friendly).
 - Must include: loading / empty / error states.
-- Motion is subtle only: hover/press transitions, skeletons; avoid flashy animation.
+- Motion: hover/press transitions, skeletons; can use flashy animation.
 
 ---
 

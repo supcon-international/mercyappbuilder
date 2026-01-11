@@ -32,7 +32,7 @@ class CreateSessionRequest(BaseModel):
         description="List of allowed tools for the agent"
     )
     model: str = Field(
-        default="claude-opus-4-5-20251101",
+        default="claude-sonnet-4-20250514",
         description="The Claude model to use"
     )
 

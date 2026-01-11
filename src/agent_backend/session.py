@@ -22,7 +22,7 @@ class Session:
         working_directory: str,
         system_prompt: str | None = None,
         allowed_tools: list[str] | None = None,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = "claude-sonnet-4-20250514",
         created_at: datetime | None = None,
         last_activity: datetime | None = None,
         sdk_session_id: str | None = None,
@@ -135,7 +135,7 @@ class Session:
             working_directory=data["working_directory"],
             system_prompt=data.get("system_prompt"),
             allowed_tools=data.get("allowed_tools"),
-            model=data.get("model", "claude-opus-4-5-20251101"),
+            model=data.get("model", "claude-sonnet-4-20250514"),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_activity=datetime.fromisoformat(data["last_activity"]),
             sdk_session_id=data.get("sdk_session_id"),
@@ -266,7 +266,7 @@ class SessionManager:
                         session_id=session_id,
                         working_directory=item_path,
                         system_prompt="基于 claude.md 完成应用构建",
-                        model="claude-opus-4-5-20251101",
+                        model="claude-sonnet-4-20250514",
                         created_at=datetime.fromtimestamp(os.path.getctime(item_path)),
                         last_activity=datetime.fromtimestamp(os.path.getmtime(item_path)),
                         db=self._db,
@@ -306,7 +306,7 @@ class SessionManager:
         self,
         system_prompt: str | None = None,
         allowed_tools: list[str] | None = None,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = "claude-sonnet-4-20250514",
     ) -> Session:
         """Create a new session with an automatically generated working directory."""
         session_id = str(uuid.uuid4())
