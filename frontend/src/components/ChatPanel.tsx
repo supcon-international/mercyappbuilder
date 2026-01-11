@@ -21,39 +21,64 @@ interface ChatPanelProps {
   session: Session | null;
 }
 
+// Extended tool type with live streaming info
+interface ExtendedTool extends ToolUse {
+  id?: string;
+  inputRaw?: string;
+  status?: 'running' | 'done';
+}
+
 // Tool call display component - shows tool name, status, and collapsible details
-function ToolCallDisplay({ tool, isActive, t }: { tool: ToolUse & { id?: string }; isActive?: boolean; t: (key: string) => string }) {
-  const [isOpen, setIsOpen] = useState(false);
+function ToolCallDisplay({ tool, isActive, t }: { tool: ExtendedTool; isActive?: boolean; t: (key: string) => string }) {
+  const [isOpen, setIsOpen] = useState(isActive); // Auto-open when active
   const hasResult = !!tool.result;
   
-  // Format input for display
-  const inputDisplay = tool.input ? JSON.stringify(tool.input, null, 2) : '';
-  const truncatedInput = inputDisplay.length > 200 ? inputDisplay.slice(0, 200) + '...' : inputDisplay;
+  // Format input for display - prefer parsed input, fallback to raw
+  const inputDisplay = tool.input && Object.keys(tool.input).length > 0
+    ? JSON.stringify(tool.input, null, 2)
+    : tool.inputRaw || '';
+  const truncatedInput = inputDisplay.length > 300 ? inputDisplay.slice(0, 300) + '...' : inputDisplay;
   
   // Truncate result
   const resultDisplay = tool.result || '';
-  const truncatedResult = resultDisplay.length > 300 ? resultDisplay.slice(0, 300) + '...' : resultDisplay;
+  const truncatedResult = resultDisplay.length > 500 ? resultDisplay.slice(0, 500) + '...' : resultDisplay;
   
   return (
-    <div className="border border-border/50 rounded-lg overflow-hidden bg-muted/30 text-xs">
+    <div className={`border rounded-lg overflow-hidden text-xs transition-all duration-200 ${
+      isActive 
+        ? 'border-primary/50 bg-primary/5 shadow-sm shadow-primary/10' 
+        : 'border-border/50 bg-muted/30'
+    }`}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors text-left"
       >
-        <span className={isActive ? 'animate-spin' : ''}>
+        <span className={`flex-shrink-0 ${isActive ? 'animate-spin' : ''}`}>
           {isActive ? '⚙️' : hasResult ? '✅' : '⏳'}
         </span>
-        <span className="font-medium text-foreground flex-1 truncate">{tool.tool}</span>
-        <span className="text-muted-foreground">{isOpen ? '▼' : '▶'}</span>
+        <span className={`font-medium flex-1 truncate ${isActive ? 'text-primary' : 'text-foreground'}`}>
+          {tool.tool}
+        </span>
+        {isActive && (
+          <span className="text-xs text-primary animate-pulse">running...</span>
+        )}
+        <span className="text-muted-foreground flex-shrink-0">{isOpen ? '▼' : '▶'}</span>
       </button>
       
       {isOpen && (
         <div className="border-t border-border/30 px-3 py-2 space-y-2 bg-background/50">
           {inputDisplay && (
             <div>
-              <div className="text-muted-foreground mb-1">{t('parameters')}:</div>
-              <pre className="bg-muted/50 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                {truncatedInput}
+              <div className="text-muted-foreground mb-1 flex items-center gap-2">
+                {t('parameters')}:
+                {isActive && !hasResult && (
+                  <span className="text-primary animate-pulse">●</span>
+                )}
+              </div>
+              <pre className={`p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all ${
+                isActive ? 'bg-primary/5 border border-primary/20' : 'bg-muted/50'
+              }`}>
+                {truncatedInput || '...'}
               </pre>
             </div>
           )}
@@ -72,8 +97,13 @@ function ToolCallDisplay({ tool, isActive, t }: { tool: ToolUse & { id?: string 
 }
 
 // Tool progress indicator component - shows current tool or summary
-function ToolProgressIndicator({ tools, isStreaming, t }: { tools: ToolUse[]; isStreaming?: boolean; t: (key: string) => string }) {
-  const [showAll, setShowAll] = useState(false);
+function ToolProgressIndicator({ tools, isStreaming, currentToolName, t }: { 
+  tools: ExtendedTool[]; 
+  isStreaming?: boolean; 
+  currentToolName?: string;
+  t: (key: string) => string;
+}) {
+  const [showAll, setShowAll] = useState(true); // Default expanded for better visibility
   
   if (!tools || tools.length === 0) return null;
   
@@ -81,49 +111,62 @@ function ToolProgressIndicator({ tools, isStreaming, t }: { tools: ToolUse[]; is
   const currentTool = tools.find(t => !t.result);
   const allDone = completedCount === tools.length && !isStreaming;
   
-  // Only show last few tools to avoid clutter
-  const recentTools = tools.slice(-5);
+  // Show more recent tools for better context
+  const recentTools = tools.slice(-8);
+  const hiddenCount = tools.length - recentTools.length;
   
   return (
-    <div className="mt-2 space-y-2">
-      {/* Summary line */}
+    <div className="mt-3 space-y-2">
+      {/* Summary line with progress bar */}
       <button 
         onClick={() => setShowAll(!showAll)}
-        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+        className="flex items-center gap-2 text-xs hover:text-foreground transition-colors w-full text-left group"
       >
         {isStreaming && currentTool ? (
           <>
             <span className="animate-spin flex-shrink-0">⚙️</span>
-            <span className="text-foreground font-medium truncate">{currentTool.tool}</span>
-            <span className="flex-shrink-0">{t('executing')}</span>
+            <span className="text-primary font-medium truncate">{currentToolName || currentTool.tool}</span>
+            <span className="text-muted-foreground flex-shrink-0">({completedCount + 1}/{tools.length})</span>
           </>
         ) : allDone ? (
           <>
             <span className="flex-shrink-0">✅</span>
-            <span>{t('completed')} {completedCount} {t('toolCalls')}</span>
+            <span className="text-muted-foreground">{t('completed')} {completedCount} {t('toolCalls')}</span>
           </>
         ) : (
           <>
             <span className="animate-pulse flex-shrink-0">⏳</span>
-            <span>{completedCount} {t('toolCalls')}</span>
+            <span className="text-muted-foreground">{completedCount}/{tools.length} {t('toolCalls')}</span>
           </>
         )}
-        <span className="ml-auto flex-shrink-0">{showAll ? '▼' : '▶'}</span>
+        <span className="ml-auto flex-shrink-0 text-muted-foreground group-hover:text-foreground transition-colors">
+          {showAll ? '▼' : '▶'}
+        </span>
       </button>
       
-      {/* Expandable tool list - show recent tools */}
+      {/* Progress bar */}
+      {isStreaming && tools.length > 1 && (
+        <div className="h-1 bg-muted rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-primary transition-all duration-300 ease-out"
+            style={{ width: `${(completedCount / tools.length) * 100}%` }}
+          />
+        </div>
+      )}
+      
+      {/* Expandable tool list */}
       {showAll && (
-        <div className="space-y-1.5 pl-1">
-          {tools.length > 5 && (
-            <div className="text-xs text-muted-foreground py-1">
-              ... {tools.length - 5} {t('toolCalls')} {t('completed')}
+        <div className="space-y-1.5">
+          {hiddenCount > 0 && (
+            <div className="text-xs text-muted-foreground/70 py-1 italic">
+              ← {hiddenCount} earlier {t('toolCalls')} hidden
             </div>
           )}
           {recentTools.map((tool, index) => (
             <ToolCallDisplay 
-              key={tool.id || (tools.length - 5 + index)} 
+              key={(tool as ExtendedTool).id || (tools.length - recentTools.length + index)} 
               tool={tool}
-              isActive={isStreaming && tool === currentTool}
+              isActive={isStreaming && !tool.result && tool === currentTool}
               t={t}
             />
           ))}
@@ -380,16 +423,31 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
             <MarkdownContent content={message.content} className="text-sm" />
           )
         ) : isStreaming ? (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
+            {/* Show current activity status */}
             <div className="flex items-center gap-2">
-              <span className="animate-pulse text-primary">●</span>
-              <span className="text-sm text-muted-foreground">{t('generating')}</span>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {(message as ChatMessage & { currentTool?: string }).currentTool 
+                  ? `${t('executing')} ${(message as ChatMessage & { currentTool?: string }).currentTool}...`
+                  : t('generating')
+                }
+              </span>
             </div>
-            {/* Show activity indicator with stats */}
-            {(message as ChatMessage & { toolCount?: number; responseLength?: number }).toolCount !== undefined && (
-              <div className="text-xs text-muted-foreground/70 pl-4">
-                {(message as ChatMessage & { toolCount?: number }).toolCount} {t('toolCalls')} • 
-                {' '}{Math.round(((message as ChatMessage & { responseLength?: number }).responseLength || 0) / 100) / 10}k chars
+            {/* Show heartbeat stats when available */}
+            {(message as ChatMessage & { toolCount?: number }).toolCount !== undefined && (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground/70 pl-4">
+                <span className="flex items-center gap-1">
+                  <span>🔧</span>
+                  {(message as ChatMessage & { toolCount?: number }).toolCount} {t('toolCalls')}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span>📝</span>
+                  {Math.round(((message as ChatMessage & { responseLength?: number }).responseLength || 0) / 100) / 10}k chars
+                </span>
               </div>
             )}
           </div>
@@ -397,7 +455,12 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
         
         {/* Tool progress - current status only */}
         {!isUser && message.tool_use && message.tool_use.length > 0 && (
-          <ToolProgressIndicator tools={message.tool_use} isStreaming={isStreaming} t={t} />
+          <ToolProgressIndicator 
+            tools={message.tool_use as ExtendedTool[]} 
+            isStreaming={isStreaming} 
+            currentToolName={(message as ChatMessage & { currentTool?: string }).currentTool}
+            t={t} 
+          />
         )}
         
         {/* Timestamp and status */}

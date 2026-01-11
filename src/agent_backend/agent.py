@@ -459,6 +459,7 @@ class AgentExecutor:
             finally:
                 await event_queue.put(None)  # Signal end
         
+        query_task = None
         try:
             # Start query task
             query_task = asyncio.create_task(run_query())
@@ -475,6 +476,17 @@ class AgentExecutor:
             
             if query_error:
                 raise query_error
+                
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected - cancel the query task and wait for it to save
+            print(f"[STREAM] Generator cancelled for session {self.session.session_id}")
+            if query_task and not query_task.done():
+                query_task.cancel()
+                try:
+                    await query_task
+                except asyncio.CancelledError:
+                    pass  # Expected
+            raise
                 
         finally:
             async with self.session._lock:

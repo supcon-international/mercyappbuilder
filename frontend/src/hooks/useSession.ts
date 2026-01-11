@@ -279,9 +279,44 @@ export function useChat(sessionId: string | null) {
               tools.push({
                 tool: toolInfo.tool,
                 input: {},
+                inputRaw: '', // Store raw input string for live display
                 id: toolInfo.id,
-              } as ToolUse & { id: string });
+                status: 'running',
+              } as ToolUse & { id: string; inputRaw?: string; status?: string });
+              return { tool_use: tools, currentTool: toolInfo.tool };
+            });
+            syncToCache(updated);
+          }
+          
+          // Handle tool input delta - live streaming of tool arguments
+          else if (chunkType === 'tool_input_delta') {
+            const inputDelta = chunk.content as string;
+            const toolId = (chunk as unknown as { tool_id: string }).tool_id;
+            const updated = updateLastAssistantMessage(currentMessages, (msg) => {
+              if (!msg.tool_use || msg.tool_use.length === 0) return {};
+              const tools = [...msg.tool_use];
+              const toolIndex = tools.findIndex((t: ToolUse & { id?: string }) => t.id === toolId);
+              if (toolIndex !== -1) {
+                const tool = { ...tools[toolIndex] } as ToolUse & { inputRaw?: string };
+                tool.inputRaw = (tool.inputRaw || '') + inputDelta;
+                // Try to parse as JSON for display
+                try {
+                  tool.input = JSON.parse(tool.inputRaw);
+                } catch {
+                  // Still accumulating, not valid JSON yet
+                }
+                tools[toolIndex] = tool;
+              }
               return { tool_use: tools };
+            });
+            syncToCache(updated);
+          }
+          
+          // Handle tool use end
+          else if (chunkType === 'tool_use_end') {
+            const updated = updateLastAssistantMessage(currentMessages, (msg) => {
+              // Tool execution complete, waiting for result
+              return { currentTool: undefined };
             });
             syncToCache(updated);
           }
