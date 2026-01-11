@@ -74,7 +74,7 @@ Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED
 ## 6) Frontend Architecture Principles (Pure frontend still needs boundaries)
 - **Domain layer**: state machines, event creation, KPI math, validation rules (centralized).
 - **Store layer**: single unified in-memory state access pattern.
-- **Persistence layer**: localStorage read/write, throttling, migrations, import/export.
+- **Persistence layer**: localStorage read/write, throttling,
 - **UI layer**: consumes domain outputs only; **no direct localStorage writes inside components**.
 
 ---
@@ -101,7 +101,6 @@ Default out-of-scope unless explicitly replacing something else:
 - Right-side navigation + #B2ED1D theme consistently applied.
 - At least one complete mock-data loop:
   - CRUD + state transitions + event timeline + KPI derived from aggregates.
-- Export/Import/Reset works reliably; demo is repeatable and stable offline.
 
 ---
 

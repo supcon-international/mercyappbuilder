@@ -122,24 +122,33 @@ export function useChat(sessionId: string | null) {
     const isSessionStreaming = streamingState.get(sessionId) || false;
     setStreaming(isSessionStreaming);
     
-    // Try to load from cache first
-    const cached = messageCache.get(sessionId);
-    if (cached && cached.length > 0) {
-      setMessages(cached);
-    } else {
-      // Fetch from server
-      setLoading(true);
-      api.getHistory(sessionId)
-        .then((response) => {
-          syncToCache(response.messages);
-        })
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : 'Failed to fetch history');
-        })
-        .finally(() => {
-          setLoading(false);
-        });
+    // If streaming, use cache only (don't interrupt)
+    if (isSessionStreaming) {
+      const cached = messageCache.get(sessionId);
+      if (cached) {
+        setMessages(cached);
+      }
+      return;
     }
+    
+    // Always fetch from server to ensure we have the latest messages
+    // This fixes the issue where assistant messages were lost after page refresh
+    setLoading(true);
+    api.getHistory(sessionId)
+      .then((response) => {
+        syncToCache(response.messages);
+      })
+      .catch((err) => {
+        // Fall back to cache on error
+        const cached = messageCache.get(sessionId);
+        if (cached && cached.length > 0) {
+          setMessages(cached);
+        }
+        setError(err instanceof Error ? err.message : 'Failed to fetch history');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [sessionId, syncToCache]);
 
   const fetchHistory = useCallback(async () => {
