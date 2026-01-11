@@ -675,7 +675,9 @@ async def serve_frontend(path: str, request: Request):
             '.woff2': 'font/woff2',
         }
         media_type = content_types.get(suffix, 'application/octet-stream')
-        return FileResponse(file_path, media_type=media_type)
+        # Add cache headers - short cache for dev, assets have content hash for cache busting
+        headers = {"Cache-Control": "public, max-age=3600"} if suffix in ('.js', '.css') else {}
+        return FileResponse(file_path, media_type=media_type, headers=headers)
     
     # For SPA: if path doesn't exist, serve index.html
     # This allows client-side routing to work

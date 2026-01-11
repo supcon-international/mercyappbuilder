@@ -261,9 +261,26 @@ class AgentExecutor:
             nonlocal response_text, thinking_text, tool_results, query_error
             current_tool_id: str | None = None
             last_save_time = asyncio.get_event_loop().time()
-            last_heartbeat_time = asyncio.get_event_loop().time()
             SAVE_INTERVAL = 30.0  # Save partial response every 30 seconds
-            HEARTBEAT_INTERVAL = 5.0  # Send heartbeat every 5 seconds
+            
+            # Flag to signal heartbeat task to stop
+            query_running = True
+            
+            async def send_heartbeats():
+                """Independent heartbeat task that runs regardless of query blocking."""
+                HEARTBEAT_INTERVAL = 3.0  # Send heartbeat every 3 seconds
+                while query_running:
+                    await asyncio.sleep(HEARTBEAT_INTERVAL)
+                    if query_running:  # Check again after sleep
+                        await event_queue.put({
+                            "type": "heartbeat",
+                            "session_id": self.session.session_id,
+                            "response_length": len(response_text),
+                            "tool_count": len(tool_results)
+                        })
+            
+            # Start heartbeat task
+            heartbeat_task = asyncio.create_task(send_heartbeats())
             
             try:
                 # Add user message to history
@@ -275,16 +292,6 @@ class AgentExecutor:
                 
                 async for msg in query(prompt=prompt_iterable, options=options):
                     current_time = asyncio.get_event_loop().time()
-                    
-                    # Send heartbeat to keep connection alive and show activity
-                    if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
-                        await event_queue.put({
-                            "type": "heartbeat",
-                            "session_id": self.session.session_id,
-                            "response_length": len(response_text),
-                            "tool_count": len(tool_results)
-                        })
-                        last_heartbeat_time = current_time
                     
                     # Periodic save of partial response
                     if current_time - last_save_time >= SAVE_INTERVAL and response_text:
@@ -431,6 +438,9 @@ class AgentExecutor:
             except asyncio.CancelledError:
                 # Task was cancelled (e.g., client disconnected)
                 print(f"[SAVE] Task cancelled, saving partial response: {len(response_text)} chars")
+                # Stop heartbeat
+                query_running = False
+                heartbeat_task.cancel()
                 if response_text:
                     self.session.add_message(
                         "assistant",
@@ -444,6 +454,9 @@ class AgentExecutor:
             except Exception as e:
                 query_error = e
                 print(f"[SAVE] Error occurred, saving partial response: {e}")
+                # Stop heartbeat
+                query_running = False
+                heartbeat_task.cancel()
                 if response_text:
                     self.session.add_message(
                         "assistant",
@@ -457,6 +470,13 @@ class AgentExecutor:
                     "session_id": self.session.session_id
                 })
             finally:
+                # Stop heartbeat task
+                query_running = False
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
                 await event_queue.put(None)  # Signal end
         
         query_task = None

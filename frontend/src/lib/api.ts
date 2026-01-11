@@ -70,7 +70,7 @@ export const api = {
     });
   },
 
-  // Streaming chat
+  // Streaming chat - v2
   async *streamMessage(
     sessionId: string,
     message: string,
