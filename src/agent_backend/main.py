@@ -497,8 +497,15 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
     if not port:
         raise HTTPException(status_code=503, detail="Preview server port not available")
     
+    project_type = status.get('project_type', 'unknown')
+    
     # Vite is started with --base=/preview/{session_id}/, so include full path
-    target_url = f"http://localhost:{port}/preview/{session_id}/{path}"
+    # Other servers (live-server, static, etc.) don't have base path configured
+    if project_type == 'vite':
+        target_url = f"http://localhost:{port}/preview/{session_id}/{path}"
+    else:
+        # For non-Vite projects, access directly at root
+        target_url = f"http://localhost:{port}/{path}"
     
     # Forward query parameters
     if request.query_params:
@@ -536,7 +543,20 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
             content = response.content
             content_type = response.headers.get('content-type', '')
             
-            # Note: Vite's --base flag handles path rewriting, no injection needed
+            # For non-Vite projects, inject <base> tag to fix relative paths
+            if project_type != 'vite' and 'text/html' in content_type:
+                try:
+                    html = content.decode('utf-8')
+                    base_tag = f'<base href="/preview/{session_id}/">'
+                    # Inject <base> after <head>
+                    if '<head>' in html and '<base' not in html.lower():
+                        html = html.replace('<head>', f'<head>\n    {base_tag}', 1)
+                        content = html.encode('utf-8')
+                        # Update content-length if present
+                        if 'content-length' in response_headers:
+                            response_headers['content-length'] = str(len(content))
+                except Exception:
+                    pass  # If injection fails, use original content
             
             return Response(
                 content=content,

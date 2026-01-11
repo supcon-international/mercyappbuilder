@@ -18,6 +18,7 @@ class PreviewServer:
     project_dir: str
     status: str  # 'starting', 'running', 'stopped', 'error', 'building'
     mode: str = 'dev'  # 'dev' or 'build'
+    project_type: str = 'unknown'  # 'vite', 'live-server', 'next', 'static', 'unknown'
     error: Optional[str] = None
     verified_port: bool = False
 
@@ -244,14 +245,15 @@ class PreviewManager:
                 env=env,
                 preexec_fn=os.setsid  # Create new process group
             )
-            
+
             server = PreviewServer(
                 session_id=session_id,
                 port=port,
                 process=process,
                 project_dir=project_dir,
                 status='starting',
-                mode='dev'
+                mode='dev',
+                project_type=project_type
             )
             self._servers[session_id] = server
             
@@ -442,6 +444,7 @@ class PreviewManager:
                 'project_dir': server.project_dir,
                 'status': server.status,
                 'mode': server.mode,
+                'project_type': server.project_type,
                 'error': server.error,
                 'verified_port': server.verified_port
             }
