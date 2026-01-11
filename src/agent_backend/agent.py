@@ -390,12 +390,14 @@ class AgentExecutor:
                                             break
                 
                 # Save assistant message
+                print(f"[SAVE] Saving assistant message: {len(response_text)} chars, {len(tool_results)} tools")
                 self.session.add_message(
                     "assistant",
                     response_text,
                     tool_use=tool_results if tool_results else None,
                     thinking=thinking_text if thinking_text else None
                 )
+                print(f"[SAVE] Message saved successfully")
                 
                 await event_queue.put({
                     "type": "done",
@@ -404,8 +406,22 @@ class AgentExecutor:
                     "is_complete": True
                 })
                 
+            except asyncio.CancelledError:
+                # Task was cancelled (e.g., client disconnected)
+                print(f"[SAVE] Task cancelled, saving partial response: {len(response_text)} chars")
+                if response_text:
+                    self.session.add_message(
+                        "assistant",
+                        response_text + "\n\n[Response interrupted - client disconnected]",
+                        tool_use=tool_results if tool_results else None,
+                        thinking=thinking_text if thinking_text else None
+                    )
+                await event_queue.put(None)
+                return  # Exit cleanly
+                
             except Exception as e:
                 query_error = e
+                print(f"[SAVE] Error occurred, saving partial response: {e}")
                 if response_text:
                     self.session.add_message(
                         "assistant",

@@ -236,13 +236,22 @@ async def send_message_stream(session_id: str, request: SendMessageRequest):
     executor = AgentExecutor(session)
     
     async def event_generator() -> AsyncGenerator[str, None]:
+        stream_gen = None
         try:
-            async for chunk in executor.execute_stream(request.message):
+            stream_gen = executor.execute_stream(request.message)
+            async for chunk in stream_gen:
                 yield f"data: {json.dumps(chunk)}\n\n"
             # Save session state after streaming completes
             await manager.save_session(session_id)
+        except asyncio.CancelledError:
+            # Client disconnected - the executor should still save the message
+            print(f"[STREAM] Client disconnected for session {session_id}")
+            await manager.save_session(session_id)
+            raise
         except Exception as e:
+            print(f"[STREAM] Error in stream: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            await manager.save_session(session_id)
     
     return StreamingResponse(
         event_generator(),
