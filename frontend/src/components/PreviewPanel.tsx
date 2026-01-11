@@ -79,18 +79,26 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
     }
   }, [sessionId]);
 
+  // Auto-start preview when panel is opened and status is not_started
+  const [autoStartAttempted, setAutoStartAttempted] = useState(false);
+  
+  useEffect(() => {
+    // Reset auto-start flag when session changes
+    setAutoStartAttempted(false);
+  }, [sessionId]);
+  
   useEffect(() => {
     fetchStatus();
-    // Poll status while starting
+    // Poll status while starting or not_started (for auto-start)
     const interval = setInterval(() => {
-      if (status?.status === 'starting') {
+      if (status?.status === 'starting' || status?.status === 'not_started') {
         fetchStatus();
       }
     }, 2000);
     return () => clearInterval(interval);
   }, [sessionId, fetchStatus, status?.status]);
 
-  const handleStart = async () => {
+  const handleStart = useCallback(async () => {
     if (!sessionId) return;
     setLoading(true);
     setError(null);
@@ -113,7 +121,20 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [sessionId]);
+  
+  // Auto-start preview when panel is opened
+  useEffect(() => {
+    if (
+      sessionId && 
+      status?.status === 'not_started' && 
+      !loading && 
+      !autoStartAttempted
+    ) {
+      setAutoStartAttempted(true);
+      handleStart();
+    }
+  }, [sessionId, status?.status, loading, autoStartAttempted, handleStart]);
 
   const handleStop = async () => {
     if (!sessionId) return;

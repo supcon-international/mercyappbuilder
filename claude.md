@@ -1,4 +1,5 @@
 # claude.md — Manufacturing Web App (Pure Frontend + localStorage, Seeded Mock Data Only)
+To avoid wasting time and tokens, prefer **installing and importing** proven frameworks and base components instead of generating large amounts of boilerplate code.
 
 Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED1D** as the primary accent, and has a **right-side module navigation rail**. The app must be **data-driven with real logic** (not static UI), while remaining **pure frontend / single-process**: everything runs in the browser and persists to `localStorage`.
 
@@ -9,7 +10,7 @@ Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED
 
 ## 1) Non-negotiables
 - **Pure frontend + `localStorage`** only. No backend services, no external databases.
-- **Right-side navigation** is mandatory (collapsible, icon-first).
+- **Left-side navigation** is mandatory (collapsible, icon-first).
 - **Primary accent is #B2ED1D** for primary actions, active states, focus states, key highlights.
 - **Logic must be real**: at least one closed loop of CRUD + state transitions + event trail + derived KPIs.
 

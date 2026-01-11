@@ -4,6 +4,7 @@ import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPanel } from '@/components/PreviewPanel';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/contexts/I18nContext';
+import { api } from '@/lib/api';
 import type { Session } from '@/types';
 
 function App() {
@@ -11,6 +12,36 @@ function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const { t, locale, toggleLocale } = useI18n();
+  
+  // Auto-show preview when a previewable project is detected
+  const [previewAutoShown, setPreviewAutoShown] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (!selectedSession?.session_id) return;
+    
+    // Don't auto-show if already shown for this session or if preview is already open
+    if (showPreview || previewAutoShown === selectedSession.session_id) return;
+    
+    // Check preview status periodically
+    const checkPreview = async () => {
+      try {
+        const status = await api.getPreviewStatus(selectedSession.session_id);
+        // Auto-show preview if running or if project exists (not_started means project found)
+        if (status.status === 'running' || (status.status === 'not_started' && status.project_dir)) {
+          setShowPreview(true);
+          setPreviewAutoShown(selectedSession.session_id);
+        }
+      } catch {
+        // Ignore errors
+      }
+    };
+    
+    // Check immediately and then every 5 seconds while streaming
+    checkPreview();
+    const interval = setInterval(checkPreview, 5000);
+    
+    return () => clearInterval(interval);
+  }, [selectedSession?.session_id, showPreview, previewAutoShown]);
   
   // Resizable panel state
   const [chatWidth, setChatWidth] = useState(50); // percentage
