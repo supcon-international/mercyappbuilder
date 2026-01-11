@@ -70,12 +70,13 @@ export const api = {
     });
   },
 
-  // Streaming chat - v2
+  // Streaming chat - v3
   async *streamMessage(
     sessionId: string,
     message: string,
     signal?: AbortSignal
   ): AsyncGenerator<StreamChunk> {
+    
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/chat/stream`, {
       method: 'POST',
       headers: {
@@ -84,7 +85,7 @@ export const api = {
       body: JSON.stringify({ message, stream: true }),
       signal,
     });
-
+    
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -100,7 +101,9 @@ export const api = {
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n\n');
@@ -111,8 +114,7 @@ export const api = {
             try {
               const data = JSON.parse(line.slice(6));
               yield data;
-            } catch {
-              // Ignore parse errors
+            } catch (e) {
             }
           }
         }

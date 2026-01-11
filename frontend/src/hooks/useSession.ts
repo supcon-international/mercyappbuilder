@@ -239,6 +239,7 @@ export function useChat(sessionId: string | null) {
       syncToCache(initialMessages);
 
       try {
+        
         for await (const chunk of api.streamMessage(sessionId, content, abortController.signal)) {
           const chunkType: string = chunk.type;
           

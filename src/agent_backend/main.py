@@ -582,6 +582,7 @@ async def api_prefix_handler(path: str, request: Request) -> Response:
     """
     Handle requests with /api prefix by forwarding to internal routes.
     This supports frontend requests that use /api prefix via Vite proxy config.
+    Supports both regular and streaming responses.
     """
     # Build internal URL without /api prefix
     internal_url = f"http://localhost:8000/{path}"
@@ -590,34 +591,60 @@ async def api_prefix_handler(path: str, request: Request) -> Response:
     if request.url.query:
         internal_url += f"?{request.url.query}"
     
+    # Check if this is a streaming endpoint
+    is_streaming = 'stream' in path
+    
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            # Get request body for POST/PUT/PATCH
-            body = None
-            if request.method in ('POST', 'PUT', 'PATCH'):
-                body = await request.body()
+        # Get request body for POST/PUT/PATCH
+        body = None
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            body = await request.body()
+        
+        if is_streaming:
+            # For streaming endpoints, use streaming response
+            async def stream_generator():
+                async with httpx.AsyncClient(timeout=600.0) as client:
+                    async with client.stream(
+                        method=request.method,
+                        url=internal_url,
+                        headers={k: v for k, v in request.headers.items() 
+                                if k.lower() not in ('host', 'content-length')},
+                        content=body,
+                    ) as response:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
             
-            # Forward the request
-            response = await client.request(
-                method=request.method,
-                url=internal_url,
-                headers={k: v for k, v in request.headers.items() 
-                        if k.lower() not in ('host', 'content-length')},
-                content=body,
+            return StreamingResponse(
+                stream_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
             )
-            
-            # Build response headers
-            response_headers = dict(response.headers)
-            response_headers.pop('content-encoding', None)
-            response_headers.pop('transfer-encoding', None)
-            response_headers.pop('content-length', None)
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=response_headers,
-                media_type=response.headers.get('content-type'),
-            )
+        else:
+            # For regular endpoints, use normal request
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.request(
+                    method=request.method,
+                    url=internal_url,
+                    headers={k: v for k, v in request.headers.items() 
+                            if k.lower() not in ('host', 'content-length')},
+                    content=body,
+                )
+                
+                # Build response headers
+                response_headers = dict(response.headers)
+                response_headers.pop('content-encoding', None)
+                response_headers.pop('transfer-encoding', None)
+                response_headers.pop('content-length', None)
+                
+                return Response(
+                    content=response.content,
+                    status_code=response.status_code,
+                    headers=response_headers,
+                    media_type=response.headers.get('content-type'),
+                )
     except httpx.ConnectError:
         raise HTTPException(status_code=503, detail="Internal API error")
     except httpx.TimeoutException:
