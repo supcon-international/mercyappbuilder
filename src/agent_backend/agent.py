@@ -121,7 +121,7 @@ class AgentExecutor:
         options_kwargs: dict[str, Any] = {
             "cwd": self.session.working_directory,
             "model": self.session.model,
-            "permission_mode": "bypassPermissions",  # Don't ask for permissions
+            "permission_mode": "bypassPermissions",  # Requires non-root user
         }
         
         # Build enhanced system prompt that references claude.md
