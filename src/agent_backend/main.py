@@ -569,6 +569,57 @@ async def health_check() -> dict:
 
 
 # ============================================================================
+# API Prefix Handler (for frontend requests with /api prefix)
+# ============================================================================
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["API"])
+async def api_prefix_handler(path: str, request: Request) -> Response:
+    """
+    Handle requests with /api prefix by forwarding to internal routes.
+    This supports frontend requests that use /api prefix via Vite proxy config.
+    """
+    # Build internal URL without /api prefix
+    internal_url = f"http://localhost:8000/{path}"
+    
+    # Include query string
+    if request.url.query:
+        internal_url += f"?{request.url.query}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            # Get request body for POST/PUT/PATCH
+            body = None
+            if request.method in ('POST', 'PUT', 'PATCH'):
+                body = await request.body()
+            
+            # Forward the request
+            response = await client.request(
+                method=request.method,
+                url=internal_url,
+                headers={k: v for k, v in request.headers.items() 
+                        if k.lower() not in ('host', 'content-length')},
+                content=body,
+            )
+            
+            # Build response headers
+            response_headers = dict(response.headers)
+            response_headers.pop('content-encoding', None)
+            response_headers.pop('transfer-encoding', None)
+            response_headers.pop('content-length', None)
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=response_headers,
+                media_type=response.headers.get('content-type'),
+            )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Internal API error")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Internal API timeout")
+
+
+# ============================================================================
 # Frontend Proxy (for single-port deployment via Cloudflare Tunnel)
 # ============================================================================
 
