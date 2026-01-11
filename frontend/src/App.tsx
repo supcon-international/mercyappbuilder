@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { SessionList } from '@/components/SessionList';
 import { ChatPanel } from '@/components/ChatPanel';
 import { PreviewPanel } from '@/components/PreviewPanel';
@@ -11,6 +11,49 @@ function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const { t, locale, toggleLocale } = useI18n();
+  
+  // Resizable panel state
+  const [chatWidth, setChatWidth] = useState(50); // percentage
+  const [isResizing, setIsResizing] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const handleMouseDown = useCallback(() => {
+    setIsResizing(true);
+  }, []);
+  
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+  
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing || !containerRef.current) return;
+    
+    const container = containerRef.current;
+    const rect = container.getBoundingClientRect();
+    const sidebarWidth = 256; // approximate sidebar width
+    const availableWidth = rect.width - sidebarWidth;
+    const mouseX = e.clientX - rect.left - sidebarWidth;
+    const percentage = (mouseX / availableWidth) * 100;
+    
+    // Clamp between 20% and 80%
+    setChatWidth(Math.min(80, Math.max(20, percentage)));
+  }, [isResizing]);
+  
+  useEffect(() => {
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+    
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, handleMouseMove, handleMouseUp]);
 
   return (
     <div className="h-screen bg-background flex flex-col antialiased relative overflow-hidden">
@@ -61,7 +104,7 @@ function App() {
       </header>
 
       {/* Main Content - Responsive */}
-      <main className="relative z-10 flex-1 flex min-h-0 bg-muted/20 backdrop-blur-sm">
+      <main ref={containerRef} className="relative z-10 flex-1 flex min-h-0 bg-muted/20 backdrop-blur-sm">
         {/* Session List Sidebar - Mobile overlay / Desktop fixed */}
         <aside className={`
           ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
@@ -94,22 +137,43 @@ function App() {
           />
         )}
 
-        {/* Chat Panel - Responsive */}
-        <section className={`
-          flex-1 p-2 sm:p-4 min-w-0
-          ${showPreview ? 'hidden md:block md:w-1/2' : 'w-full'}
-        `}>
+        {/* Chat Panel - Responsive & Resizable */}
+        <section 
+          className={`
+            p-2 sm:p-4 min-w-0
+            ${showPreview ? 'hidden md:block' : 'flex-1'}
+          `}
+          style={showPreview ? { width: `${chatWidth}%` } : undefined}
+        >
           <ChatPanel session={selectedSession} />
         </section>
 
-        {/* Preview Panel - Responsive */}
+        {/* Resize Handle */}
         {showPreview && (
-          <section className={`
-            w-full md:w-1/2 
-            p-2 sm:p-4 
-            border-l border-border/50
-            ${showPreview ? 'block' : 'hidden'}
-          `}>
+          <div
+            className="hidden md:flex w-1 hover:w-2 bg-border/50 hover:bg-primary/50 cursor-col-resize items-center justify-center transition-all group"
+            onMouseDown={handleMouseDown}
+          >
+            <div className="w-0.5 h-8 bg-border group-hover:bg-primary rounded-full" />
+          </div>
+        )}
+
+        {/* Preview Panel - Responsive & Resizable */}
+        {showPreview && (
+          <section 
+            className="p-2 sm:p-4 min-w-0 hidden md:block"
+            style={{ width: `${100 - chatWidth}%` }}
+          >
+            <PreviewPanel
+              sessionId={selectedSession?.session_id || null}
+              onClose={() => setShowPreview(false)}
+            />
+          </section>
+        )}
+        
+        {/* Mobile Preview (full width) */}
+        {showPreview && (
+          <section className="w-full p-2 sm:p-4 md:hidden">
             <PreviewPanel
               sessionId={selectedSession?.session_id || null}
               onClose={() => setShowPreview(false)}
