@@ -71,47 +71,59 @@ function ToolCallDisplay({ tool, isActive, t }: { tool: ToolUse & { id?: string 
   );
 }
 
-// Tool progress indicator component - summary + expandable list
+// Tool progress indicator component - shows current tool or summary
 function ToolProgressIndicator({ tools, isStreaming, t }: { tools: ToolUse[]; isStreaming?: boolean; t: (key: string) => string }) {
   const [showAll, setShowAll] = useState(false);
   
   if (!tools || tools.length === 0) return null;
   
   const completedCount = tools.filter(t => t.result).length;
-  const currentToolIndex = tools.findIndex(t => !t.result);
-  const allDone = completedCount === tools.length;
+  const currentTool = tools.find(t => !t.result);
+  const allDone = completedCount === tools.length && !isStreaming;
+  
+  // Only show last few tools to avoid clutter
+  const recentTools = tools.slice(-5);
   
   return (
     <div className="mt-2 space-y-2">
       {/* Summary line */}
       <button 
         onClick={() => setShowAll(!showAll)}
-        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left"
       >
-        {isStreaming && !allDone ? (
+        {isStreaming && currentTool ? (
           <>
-            <span className="animate-spin">⚙️</span>
-            <span className="text-foreground font-medium">{tools[currentToolIndex]?.tool}</span>
-            <span>{t('executing')}</span>
-            <span>({completedCount + 1}/{tools.length})</span>
+            <span className="animate-spin flex-shrink-0">⚙️</span>
+            <span className="text-foreground font-medium truncate">{currentTool.tool}</span>
+            <span className="flex-shrink-0">{t('executing')}</span>
+          </>
+        ) : allDone ? (
+          <>
+            <span className="flex-shrink-0">✅</span>
+            <span>{t('completed')} {completedCount} {t('toolCalls')}</span>
           </>
         ) : (
           <>
-            <span>✅</span>
-            <span>{t('completed')} {completedCount} {t('toolCalls')}</span>
+            <span className="animate-pulse flex-shrink-0">⏳</span>
+            <span>{completedCount} {t('toolCalls')}</span>
           </>
         )}
-        <span className="ml-auto">{showAll ? '▼' : '▶'}</span>
+        <span className="ml-auto flex-shrink-0">{showAll ? '▼' : '▶'}</span>
       </button>
       
-      {/* Expandable tool list */}
+      {/* Expandable tool list - show recent tools */}
       {showAll && (
         <div className="space-y-1.5 pl-1">
-          {tools.map((tool, index) => (
+          {tools.length > 5 && (
+            <div className="text-xs text-muted-foreground py-1">
+              ... {tools.length - 5} {t('toolCalls')} {t('completed')}
+            </div>
+          )}
+          {recentTools.map((tool, index) => (
             <ToolCallDisplay 
-              key={tool.id || index} 
+              key={tool.id || (tools.length - 5 + index)} 
               tool={tool}
-              isActive={isStreaming && index === currentToolIndex}
+              isActive={isStreaming && tool === currentTool}
               t={t}
             />
           ))}
