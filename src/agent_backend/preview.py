@@ -124,9 +124,9 @@ class PreviewManager:
                 env = os.environ.copy()
                 env['PORT'] = str(port)
                 
-                # Try to start with npm run dev
+                # Try to start with npm run dev (add --host for Vite compatibility)
                 process = subprocess.Popen(
-                    ["npm", "run", "dev", "--", "--port", str(port)],
+                    ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0"],
                     cwd=project_dir,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
