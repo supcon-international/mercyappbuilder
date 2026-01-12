@@ -1,6 +1,16 @@
 # Tier0 Appbuilder
 
-基于 Claude Agent SDK 的 Web 应用构建器，支持多 Session、实时预览、流式响应。
+基于 Claude Agent SDK 的 AI 应用构建器，支持多 Session、流式响应、实时预览。
+
+## 特性
+
+- **多模型支持**: Claude Opus 4.5/4、Sonnet 4.5/4、Haiku 4.5
+- **流式响应**: SSE 实时输出，思考过程可视化，工具调用状态展示
+- **多 Session**: 独立工作目录，隔离的对话历史
+- **实时预览**: 构建并预览 Session 内的 Web 项目
+- **SQLite 持久化**: 会话和消息持久化，重启不丢失
+- **国际化**: 中英文切换
+- **错误恢复**: API 重试、错误边界、断线恢复
 
 ## 快速开始
 
@@ -34,23 +44,14 @@ cd frontend && npm run dev
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | API + 前端 | 8000 | FastAPI，同时服务静态前端和 API |
-| Preview | 4001-4100 | 动态分配，Session 内 Web 项目预览 |
+| View | 4001-4100 | 动态分配，Session 内 Web 项目预览 |
 
 ## 公网访问（Tunnel）
 
 只需穿透 **8000 端口**。后端会：
 - 直接服务前端静态文件
 - 处理 `/api/*` 请求
-- 代理 `/preview/{session_id}/*` 到对应 Preview 服务器
-
-## 核心功能
-
-- **多 Session**: 独立工作目录，隔离的对话历史
-- **流式响应**: SSE 实时输出，心跳保活，工具调用状态实时展示
-- **Preview**: 实时预览 Session 内构建的 Web 项目
-- **SQLite 持久化**: 会话和消息持久化，重启不丢失
-- **国际化**: 中英文切换
-- **bypassPermissions**: 自动执行工具，无需手动批准
+- 代理 `/view/{session_id}/*` 到对应 View 服务器
 
 ## API
 
@@ -61,8 +62,10 @@ cd frontend && npm run dev
 | DELETE | `/sessions/{id}?delete=true` | 删除 Session |
 | POST | `/sessions/{id}/chat/stream` | 发送消息（流式）|
 | GET | `/sessions/{id}/history` | 获取历史 |
-| POST | `/sessions/{id}/preview/start` | 启动 Preview |
-| GET | `/preview/{id}/*` | Preview 代理 |
+| POST | `/sessions/{id}/view/start` | 构建并启动 View |
+| POST | `/sessions/{id}/view/stop` | 停止 View |
+| GET | `/sessions/{id}/view/status` | View 状态 |
+| GET | `/view/{id}/*` | View 代理 |
 
 ## 项目结构
 
@@ -71,12 +74,14 @@ cd frontend && npm run dev
 │   ├── main.py           # 入口 + 路由
 │   ├── session.py        # Session 管理 + SQLite
 │   ├── agent.py          # Claude Agent 执行器
-│   └── preview.py        # Preview 服务器管理
+│   ├── view.py           # View 服务器管理
+│   └── permissions.py    # 权限管理
 ├── frontend/             # 前端 (React + Vite + Shadcn)
 │   ├── src/
 │   │   ├── components/   # UI 组件
-│   │   └── hooks/        # 自定义 Hooks
-│   └── dist/             # 构建产物（被后端服务）
+│   │   ├── hooks/        # 自定义 Hooks
+│   │   └── lib/          # 工具函数
+│   └── dist/             # 构建产物
 ├── .sessions/            # Session 工作目录 (自动创建)
 └── claude.md             # Agent 构建指南
 ```

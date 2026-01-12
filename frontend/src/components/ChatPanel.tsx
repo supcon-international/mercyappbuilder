@@ -129,22 +129,24 @@ function TodoListDisplay({ todos, t }: { todos: TodoItem[]; t: (key: string) => 
   );
 }
 
-// Simple tool list - just shows tool names without JSON details
-function ToolProgressIndicator({ tools, isStreaming, currentToolName }: { 
+// Simple tool list - shows completed tool count only
+function ToolProgressIndicator({ tools, isStreaming }: { 
   tools: ExtendedTool[]; 
   isStreaming?: boolean; 
   currentToolName?: string;
   t: (key: string) => string;
 }) {
-  // Defensive check
   if (!tools || !Array.isArray(tools) || tools.length === 0) return null;
   
+  // Find the last tool (current one being executed if streaming)
+  const lastToolIndex = tools.length - 1;
   const completedCount = tools.filter(t => t?.result).length;
   
   return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
+    <div className="mt-3 flex flex-wrap gap-1.5 items-center">
       {tools.map((tool, index) => {
-        const isActive = isStreaming && !tool.result && tool.tool === currentToolName;
+        // Only the last tool without result is active
+        const isActive = isStreaming && index === lastToolIndex && !tool.result;
         const isDone = !!tool.result;
         
         return (
@@ -165,9 +167,10 @@ function ToolProgressIndicator({ tools, isStreaming, currentToolName }: {
           </span>
         );
       })}
-      {isStreaming && completedCount < tools.length && (
-        <span className="text-xs text-muted-foreground/60 self-center ml-1">
-          {completedCount}/{tools.length}
+      {/* Only show count after completion */}
+      {!isStreaming && completedCount > 0 && (
+        <span className="text-xs text-muted-foreground/50 ml-1">
+          ({completedCount})
         </span>
       )}
     </div>
@@ -191,11 +194,11 @@ function ThinkingBlock({ thinking, isStreaming, t }: { thinking: string; isStrea
   const thinkingLines = thinking.split('\n').length;
   const thinkingChars = thinking.length;
 
-  // When streaming, show compact live view
+  // When streaming, show live view with more content
   if (isStreaming) {
-    // Get last few lines for live preview
+    // Get more lines for live preview
     const lines = thinking.split('\n');
-    const lastLines = lines.slice(-5).join('\n');
+    const lastLines = lines.slice(-15).join('\n');
     
     return (
       <div className="mb-3 rounded-lg overflow-hidden border border-purple-500/30 bg-gradient-to-r from-purple-500/5 to-transparent">
@@ -214,13 +217,13 @@ function ThinkingBlock({ thinking, isStreaming, t }: { thinking: string; isStrea
           </span>
         </div>
         
-        {/* Live thinking content - auto-scroll to bottom */}
+        {/* Live thinking content - larger view */}
         <div 
           ref={thinkingRef}
-          className="px-3 py-2 text-sm text-muted-foreground font-mono leading-relaxed max-h-32 overflow-y-auto"
+          className="px-3 py-2 text-sm text-muted-foreground font-mono leading-relaxed max-h-64 overflow-y-auto"
           style={{ scrollBehavior: 'smooth' }}
         >
-          <div className="whitespace-pre-wrap break-words opacity-80">
+          <div className="whitespace-pre-wrap break-words">
             {lastLines}
             <span className="inline-block w-1.5 h-4 bg-purple-500/70 animate-pulse ml-0.5 align-middle" />
           </div>
