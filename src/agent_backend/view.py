@@ -1,12 +1,14 @@
 """View server management for session web projects (build mode only)."""
 
 import asyncio
+import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
-from dataclasses import dataclass
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -18,6 +20,7 @@ class ViewServer:
     project_dir: str
     status: str  # 'building', 'running', 'stopped', 'error'
     error: Optional[str] = None
+    candidates_found: List[str] = field(default_factory=list)
 
 
 class ViewManager:
@@ -48,60 +51,119 @@ class ViewManager:
                 return port
         raise RuntimeError("No available ports for view server")
     
-    def _has_build_script(self, project_dir: str) -> bool:
-        """Check if package.json has a build script."""
-        import json
+    def _read_package_json(self, project_dir: str) -> Optional[dict]:
+        """Read and parse package.json from a directory."""
         package_json_path = os.path.join(project_dir, "package.json")
         if not os.path.exists(package_json_path):
-            return False
+            return None
         try:
             with open(package_json_path, 'r') as f:
-                pkg = json.load(f)
-            scripts = pkg.get('scripts', {})
-            return 'build' in scripts
+                return json.load(f)
         except Exception:
-            return False
+            return None
     
-    def _find_project_dir(self, working_directory: str) -> Optional[str]:
-        """Find the web project directory within the session's working directory."""
+    def _has_build_script(self, project_dir: str) -> bool:
+        """Check if package.json has a build script."""
+        pkg = self._read_package_json(project_dir)
+        if not pkg:
+            return False
+        scripts = pkg.get('scripts', {})
+        return 'build' in scripts
+    
+    def _is_web_project(self, project_dir: str) -> bool:
+        """Check if directory is a web project (has package.json with useful scripts or vite/react)."""
+        pkg = self._read_package_json(project_dir)
+        if not pkg:
+            return False
+        
+        scripts = pkg.get('scripts', {})
+        deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
+        
+        # Has build/dev/start script
+        if any(s in scripts for s in ('build', 'dev', 'start')):
+            return True
+        
+        # Has vite or react
+        if any(d in deps for d in ('vite', 'react', 'vue', 'next', 'svelte')):
+            return True
+        
+        return False
+    
+    def _find_project_dir(self, working_directory: str) -> tuple[Optional[str], List[str]]:
+        """
+        Find the web project directory within the session's working directory.
+        Uses recursive traversal up to MAX_DEPTH levels.
+        Returns (project_dir, all_candidates_found).
+        """
+        MAX_DEPTH = 4
+        SKIP_DIRS = {'node_modules', '.git', '.vite', 'dist', 'build', '__pycache__', '.next'}
+        
         candidates = []
         
-        # Priority 1: Common subdirectory names
-        for subdir in ["web", "frontend", "app"]:
-            path = os.path.join(working_directory, subdir)
-            if os.path.exists(os.path.join(path, "package.json")):
-                candidates.append(path)
+        print(f"[VIEW] Searching for project in: {working_directory}")
         
-        # Priority 2: Any subdirectory with package.json (one level deep)
-        try:
-            for item in os.listdir(working_directory):
-                item_path = os.path.join(working_directory, item)
-                if os.path.isdir(item_path) and not item.startswith('.') and item not in ["node_modules"]:
-                    if os.path.exists(os.path.join(item_path, "package.json")):
-                        if item_path not in candidates:
-                            candidates.append(item_path)
-        except Exception:
-            pass
+        if not os.path.exists(working_directory):
+            print(f"[VIEW] Working directory does not exist: {working_directory}")
+            return None, []
         
-        # Priority 3: Root directory
-        if os.path.exists(os.path.join(working_directory, "package.json")):
-            candidates.append(working_directory)
+        def recursive_search(current_dir: str, depth: int):
+            """Recursively search for package.json files."""
+            if depth > MAX_DEPTH:
+                return
+            
+            try:
+                # Check if current directory has package.json
+                pkg_path = os.path.join(current_dir, "package.json")
+                if os.path.exists(pkg_path):
+                    candidates.append(current_dir)
+                    rel_path = os.path.relpath(current_dir, working_directory)
+                    print(f"[VIEW] Found candidate: {rel_path}")
+                
+                # Continue searching subdirectories
+                for item in os.listdir(current_dir):
+                    if item.startswith('.') or item in SKIP_DIRS:
+                        continue
+                    item_path = os.path.join(current_dir, item)
+                    if os.path.isdir(item_path):
+                        recursive_search(item_path, depth + 1)
+            except PermissionError:
+                pass
+            except Exception as e:
+                print(f"[VIEW] Error searching {current_dir}: {e}")
         
-        # First, try to find a directory with build script
-        for candidate in candidates:
-            if self._has_build_script(candidate):
-                return candidate
+        # Start recursive search
+        recursive_search(working_directory, 0)
         
-        # Fallback: return first candidate with package.json
-        for candidate in candidates:
-            if os.path.exists(os.path.join(candidate, "package.json")):
-                return candidate
+        if not candidates:
+            print(f"[VIEW] No package.json found (searched {MAX_DEPTH} levels deep)")
+            # Check for static HTML
+            if os.path.exists(os.path.join(working_directory, "index.html")):
+                print(f"[VIEW] Found static index.html")
+                return working_directory, [working_directory]
+            return None, []
         
-        # Last fallback: check for index.html in root (static site)
-        if os.path.exists(os.path.join(working_directory, "index.html")):
-            return working_directory
+        # Sort candidates: prefer those with build scripts and web frameworks
+        def score_candidate(path: str) -> int:
+            score = 0
+            if self._has_build_script(path):
+                score += 10
+            if self._is_web_project(path):
+                score += 5
+            # Prefer common names
+            name = os.path.basename(path)
+            if name in ('web', 'frontend', 'app', 'client'):
+                score += 3
+            # Prefer shallower paths (less nested = higher score)
+            depth = path.replace(working_directory, '').count(os.sep)
+            score -= depth * 2
+            return score
         
-        return None
+        candidates.sort(key=score_candidate, reverse=True)
+        
+        best = candidates[0]
+        print(f"[VIEW] Selected project: {best} (from {len(candidates)} candidates)")
+        
+        return best, candidates
     
     async def _verify_port_listening(self, port: int, timeout: float = 10.0) -> bool:
         """Wait for a port to start listening."""
@@ -115,24 +177,32 @@ class ViewManager:
     async def start_view(self, session_id: str, working_directory: str) -> ViewServer:
         """Start a view server for a session (always uses build mode)."""
         async with self._lock:
-            # Check if already running
+            # Clean up any existing server for this session
             if session_id in self._servers:
                 server = self._servers[session_id]
+                # Only return existing if truly healthy
                 if server.status == 'running' and server.process and server.process.poll() is None:
                     if self._is_port_in_use(server.port):
+                        print(f"[VIEW] Reusing existing server for {session_id} on port {server.port}")
                         return server
+                # Clean up old state
                 await self._stop_server(session_id)
+                del self._servers[session_id]
             
             # Find project directory
-            project_dir = self._find_project_dir(working_directory)
+            project_dir, candidates = self._find_project_dir(working_directory)
+            
             if not project_dir:
+                error_msg = f'No package.json found. Searched in: {working_directory}'
+                print(f"[VIEW] Error: {error_msg}")
                 server = ViewServer(
                     session_id=session_id,
                     port=0,
                     process=None,
                     project_dir=working_directory,
                     status='error',
-                    error='No package.json found in working directory'
+                    error=error_msg,
+                    candidates_found=candidates
                 )
                 self._servers[session_id] = server
                 return server
@@ -140,6 +210,7 @@ class ViewManager:
             # Check if node_modules exists, if not run npm install first
             node_modules = os.path.join(project_dir, "node_modules")
             if not os.path.exists(node_modules):
+                print(f"[VIEW] Installing dependencies for {session_id}...")
                 try:
                     install_process = await asyncio.create_subprocess_exec(
                         "npm", "install",
@@ -147,15 +218,46 @@ class ViewManager:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE
                     )
-                    await asyncio.wait_for(install_process.wait(), timeout=120)
-                except Exception as e:
+                    stdout, stderr = await asyncio.wait_for(install_process.communicate(), timeout=180)
+                    if install_process.returncode != 0:
+                        error_msg = f'npm install failed: {stderr.decode()[:300]}'
+                        print(f"[VIEW] {error_msg}")
+                        server = ViewServer(
+                            session_id=session_id,
+                            port=0,
+                            process=None,
+                            project_dir=project_dir,
+                            status='error',
+                            error=error_msg,
+                            candidates_found=candidates
+                        )
+                        self._servers[session_id] = server
+                        return server
+                except asyncio.TimeoutError:
+                    error_msg = 'npm install timed out (180s)'
+                    print(f"[VIEW] {error_msg}")
                     server = ViewServer(
                         session_id=session_id,
                         port=0,
                         process=None,
                         project_dir=project_dir,
                         status='error',
-                        error=f'Failed to install dependencies: {str(e)}'
+                        error=error_msg,
+                        candidates_found=candidates
+                    )
+                    self._servers[session_id] = server
+                    return server
+                except Exception as e:
+                    error_msg = f'Failed to install dependencies: {str(e)}'
+                    print(f"[VIEW] {error_msg}")
+                    server = ViewServer(
+                        session_id=session_id,
+                        port=0,
+                        process=None,
+                        project_dir=project_dir,
+                        status='error',
+                        error=error_msg,
+                        candidates_found=candidates
                     )
                     self._servers[session_id] = server
                     return server
@@ -165,59 +267,90 @@ class ViewManager:
             self._used_ports.add(port)
             
             # Build and serve
-            return await self._build_and_serve(session_id, project_dir, port)
+            return await self._build_and_serve(session_id, project_dir, port, candidates)
     
-    async def _build_and_serve(self, session_id: str, project_dir: str, port: int) -> ViewServer:
+    async def _build_and_serve(self, session_id: str, project_dir: str, port: int, candidates: List[str]) -> ViewServer:
         """Build project and start a static server."""
         server = ViewServer(
             session_id=session_id,
             port=port,
             process=None,
             project_dir=project_dir,
-            status='building'
+            status='building',
+            candidates_found=candidates
         )
         self._servers[session_id] = server
         
         try:
             # Check if we have a build script
             if self._has_build_script(project_dir):
-                # Run npm build
-                print(f"[VIEW] Building project for {session_id}...")
-                build_process = await asyncio.create_subprocess_exec(
-                    "npm", "run", "build",
-                    cwd=project_dir,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
+                max_retries = 3
+                last_error = ""
                 
-                try:
-                    stdout, stderr = await asyncio.wait_for(build_process.communicate(), timeout=180)
+                for attempt in range(max_retries):
+                    # Clean dist directory before retry
+                    if attempt > 0:
+                        print(f"[VIEW] Retry {attempt + 1}/{max_retries} for {session_id}...")
+                        for dir_name in ["dist", "build"]:
+                            dir_path = os.path.join(project_dir, dir_name)
+                            if os.path.exists(dir_path):
+                                try:
+                                    shutil.rmtree(dir_path)
+                                except Exception as e:
+                                    print(f"[VIEW] Failed to clean {dir_path}: {e}")
+                        await asyncio.sleep(1)
                     
-                    if build_process.returncode != 0:
-                        server.status = 'error'
-                        server.error = f'Build failed: {stderr.decode()[:500]}'
-                        self._used_ports.discard(port)
-                        return server
-                except asyncio.TimeoutError:
-                    server.status = 'error'
-                    server.error = 'Build timed out (180s)'
-                    self._used_ports.discard(port)
-                    return server
+                    print(f"[VIEW] Building project for {session_id}..." + (f" (attempt {attempt + 1})" if attempt > 0 else ""))
+                    
+                    build_process = await asyncio.create_subprocess_exec(
+                        "npm", "run", "build", "--", "--base=./",
+                        cwd=project_dir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    
+                    try:
+                        stdout, stderr = await asyncio.wait_for(build_process.communicate(), timeout=180)
+                        
+                        if build_process.returncode == 0:
+                            print(f"[VIEW] Build succeeded for {session_id}")
+                            break
+                        else:
+                            last_error = stderr.decode()[:500]
+                            print(f"[VIEW] Build failed (attempt {attempt + 1}): {last_error[:100]}...")
+                            if attempt == max_retries - 1:
+                                server.status = 'error'
+                                server.error = f'Build failed after {max_retries} attempts: {last_error}'
+                                self._used_ports.discard(port)
+                                return server
+                    except asyncio.TimeoutError:
+                        last_error = 'Build timed out (180s)'
+                        print(f"[VIEW] {last_error}")
+                        if attempt == max_retries - 1:
+                            server.status = 'error'
+                            server.error = last_error
+                            self._used_ports.discard(port)
+                            return server
                 
                 # Find dist directory
                 dist_dir = os.path.join(project_dir, "dist")
                 if not os.path.exists(dist_dir):
-                    # Try build directory
                     dist_dir = os.path.join(project_dir, "build")
                 if not os.path.exists(dist_dir):
-                    server.status = 'error'
-                    server.error = 'Build completed but dist/build directory not found'
-                    self._used_ports.discard(port)
-                    return server
+                    # Check for .next (Next.js)
+                    next_dir = os.path.join(project_dir, ".next")
+                    if os.path.exists(next_dir):
+                        dist_dir = project_dir  # Next.js serves from project root
+                    else:
+                        server.status = 'error'
+                        server.error = 'Build completed but dist/build directory not found'
+                        self._used_ports.discard(port)
+                        return server
                 
                 serve_dir = dist_dir
             else:
                 # No build script, serve the project directory directly (static site)
+                print(f"[VIEW] No build script, serving directory directly: {project_dir}")
                 serve_dir = project_dir
             
             # Start static server using npx serve
@@ -233,15 +366,22 @@ class ViewManager:
             server.process = process
             
             # Wait for server to start
-            port_ready = await self._verify_port_listening(port, timeout=10.0)
+            port_ready = await self._verify_port_listening(port, timeout=15.0)
             
             if process.poll() is None and port_ready:
                 server.status = 'running'
                 print(f"[VIEW] Server started for {session_id} on port {port}")
             else:
+                stderr_output = ""
+                if process.poll() is not None:
+                    try:
+                        stderr_output = process.stderr.read().decode()[:200]
+                    except:
+                        pass
                 server.status = 'error'
-                server.error = 'Static server failed to start'
+                server.error = f'Static server failed to start. {stderr_output}'
                 self._used_ports.discard(port)
+                print(f"[VIEW] Server failed to start: {server.error}")
             
             return server
             
@@ -249,6 +389,7 @@ class ViewManager:
             self._used_ports.discard(port)
             server.status = 'error'
             server.error = str(e)
+            print(f"[VIEW] Exception: {e}")
             return server
     
     async def _stop_server(self, session_id: str) -> bool:
@@ -266,8 +407,8 @@ class ViewManager:
                     os.killpg(os.getpgid(server.process.pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[VIEW] Error stopping server: {e}")
         
         self._used_ports.discard(server.port)
         server.status = 'stopped'
@@ -308,7 +449,8 @@ class ViewManager:
                 'url': f'http://localhost:{server.port}' if server.status == 'running' else None,
                 'project_dir': server.project_dir,
                 'status': server.status,
-                'error': server.error
+                'error': server.error,
+                'candidates_found': server.candidates_found
             }
     
     async def cleanup_all(self):

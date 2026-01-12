@@ -37,10 +37,13 @@ interface TodoItem {
 
 // Extract the latest todos from tool_use array
 function extractLatestTodos(tools: ToolUse[]): TodoItem[] | null {
+  // Defensive check
+  if (!tools || !Array.isArray(tools)) return null;
+  
   // Find the last TodoWrite tool
   for (let i = tools.length - 1; i >= 0; i--) {
     const tool = tools[i];
-    if (tool.tool === 'TodoWrite' && tool.input?.todos) {
+    if (tool?.tool === 'TodoWrite' && Array.isArray(tool.input?.todos)) {
       return tool.input.todos as TodoItem[];
     }
   }
@@ -49,6 +52,9 @@ function extractLatestTodos(tools: ToolUse[]): TodoItem[] | null {
 
 // Todo list display component
 function TodoListDisplay({ todos, t }: { todos: TodoItem[]; t: (key: string) => string }) {
+  // Defensive: ensure todos is a valid array
+  if (!todos || !Array.isArray(todos) || todos.length === 0) return null;
+  
   const completedCount = todos.filter(t => t.status === 'completed').length;
   const inProgressItem = todos.find(t => t.status === 'in_progress');
   const progress = Math.round((completedCount / todos.length) * 100);
@@ -123,178 +129,133 @@ function TodoListDisplay({ todos, t }: { todos: TodoItem[]; t: (key: string) => 
   );
 }
 
-// Tool call display component - shows tool name, status, and collapsible details
-function ToolCallDisplay({ tool, isActive, t }: { tool: ExtendedTool; isActive?: boolean; t: (key: string) => string }) {
-  const [isOpen, setIsOpen] = useState(isActive); // Auto-open when active
-  const hasResult = !!tool.result;
-  
-  // Format input for display - prefer parsed input, fallback to raw
-  const inputDisplay = tool.input && Object.keys(tool.input).length > 0
-    ? JSON.stringify(tool.input, null, 2)
-    : tool.inputRaw || '';
-  const truncatedInput = inputDisplay.length > 300 ? inputDisplay.slice(0, 300) + '...' : inputDisplay;
-  
-  // Truncate result
-  const resultDisplay = tool.result || '';
-  const truncatedResult = resultDisplay.length > 500 ? resultDisplay.slice(0, 500) + '...' : resultDisplay;
-  
-  return (
-    <div className={`border rounded-lg overflow-hidden text-xs transition-all duration-200 ${
-      isActive 
-        ? 'border-primary/50 bg-primary/5 shadow-sm shadow-primary/10' 
-        : 'border-border/50 bg-muted/30'
-    }`}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors text-left"
-      >
-        <span className={`flex-shrink-0 ${isActive ? 'animate-spin' : ''}`}>
-          {isActive ? '⚙️' : hasResult ? '✅' : '⏳'}
-        </span>
-        <span className={`font-medium flex-1 truncate ${isActive ? 'text-primary' : 'text-foreground'}`}>
-          {tool.tool}
-        </span>
-        {isActive && (
-          <span className="text-xs text-primary animate-pulse">running...</span>
-        )}
-        <span className="text-muted-foreground flex-shrink-0">{isOpen ? '▼' : '▶'}</span>
-      </button>
-      
-      {isOpen && (
-        <div className="border-t border-border/30 px-3 py-2 space-y-2 bg-background/50">
-          {inputDisplay && (
-            <div>
-              <div className="text-muted-foreground mb-1 flex items-center gap-2">
-                {t('parameters')}:
-                {isActive && !hasResult && (
-                  <span className="text-primary animate-pulse">●</span>
-                )}
-              </div>
-              <pre className={`p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all ${
-                isActive ? 'bg-primary/5 border border-primary/20' : 'bg-muted/50'
-              }`}>
-                {truncatedInput || '...'}
-              </pre>
-            </div>
-          )}
-          {hasResult && (
-            <div>
-              <div className="text-muted-foreground mb-1">{t('result')}:</div>
-              <pre className="bg-muted/50 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
-                {truncatedResult}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Tool progress indicator component - shows current tool or summary
-function ToolProgressIndicator({ tools, isStreaming, currentToolName, t }: { 
+// Simple tool list - just shows tool names without JSON details
+function ToolProgressIndicator({ tools, isStreaming, currentToolName }: { 
   tools: ExtendedTool[]; 
   isStreaming?: boolean; 
   currentToolName?: string;
   t: (key: string) => string;
 }) {
-  const [showAll, setShowAll] = useState(true); // Default expanded for better visibility
+  // Defensive check
+  if (!tools || !Array.isArray(tools) || tools.length === 0) return null;
   
-  if (!tools || tools.length === 0) return null;
-  
-  const completedCount = tools.filter(t => t.result).length;
-  const currentTool = tools.find(t => !t.result);
-  const allDone = completedCount === tools.length && !isStreaming;
-  
-  // Show more recent tools for better context
-  const recentTools = tools.slice(-8);
-  const hiddenCount = tools.length - recentTools.length;
+  const completedCount = tools.filter(t => t?.result).length;
   
   return (
-    <div className="mt-3 space-y-2">
-      {/* Summary line with progress bar */}
-      <button 
-        onClick={() => setShowAll(!showAll)}
-        className="flex items-center gap-2 text-xs hover:text-foreground transition-colors w-full text-left group"
-      >
-        {isStreaming && currentTool ? (
-          <>
-            <span className="animate-spin flex-shrink-0">⚙️</span>
-            <span className="text-primary font-medium truncate">{currentToolName || currentTool.tool}</span>
-            <span className="text-muted-foreground flex-shrink-0">({completedCount + 1}/{tools.length})</span>
-          </>
-        ) : allDone ? (
-          <>
-            <span className="flex-shrink-0">✅</span>
-            <span className="text-muted-foreground">{t('completed')} {completedCount} {t('toolCalls')}</span>
-          </>
-        ) : (
-          <>
-            <span className="animate-pulse flex-shrink-0">⏳</span>
-            <span className="text-muted-foreground">{completedCount}/{tools.length} {t('toolCalls')}</span>
-          </>
-        )}
-        <span className="ml-auto flex-shrink-0 text-muted-foreground group-hover:text-foreground transition-colors">
-          {showAll ? '▼' : '▶'}
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {tools.map((tool, index) => {
+        const isActive = isStreaming && !tool.result && tool.tool === currentToolName;
+        const isDone = !!tool.result;
+        
+        return (
+          <span
+            key={(tool as ExtendedTool).id || index}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all ${
+              isActive
+                ? 'bg-primary/15 text-primary border border-primary/30'
+                : isDone
+                ? 'bg-muted/50 text-muted-foreground'
+                : 'bg-muted/30 text-muted-foreground/70'
+            }`}
+          >
+            <span className={isActive ? 'animate-spin' : ''}>
+              {isActive ? '⚙️' : isDone ? '✓' : '○'}
+            </span>
+            <span className="truncate max-w-[120px]">{tool.tool}</span>
+          </span>
+        );
+      })}
+      {isStreaming && completedCount < tools.length && (
+        <span className="text-xs text-muted-foreground/60 self-center ml-1">
+          {completedCount}/{tools.length}
         </span>
-      </button>
-      
-      {/* Progress bar */}
-      {isStreaming && tools.length > 1 && (
-        <div className="h-1 bg-muted rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-primary transition-all duration-300 ease-out"
-            style={{ width: `${(completedCount / tools.length) * 100}%` }}
-          />
-        </div>
-      )}
-      
-      {/* Expandable tool list */}
-      {showAll && (
-        <div className="space-y-1.5">
-          {hiddenCount > 0 && (
-            <div className="text-xs text-muted-foreground/70 py-1 italic">
-              ← {hiddenCount} earlier {t('toolCalls')} hidden
-            </div>
-          )}
-          {recentTools.map((tool, index) => (
-            <ToolCallDisplay 
-              key={(tool as ExtendedTool).id || (tools.length - recentTools.length + index)} 
-              tool={tool}
-              isActive={isStreaming && !tool.result && tool === currentTool}
-              t={t}
-            />
-          ))}
-        </div>
       )}
     </div>
   );
 }
 
-// Thinking process component
+// Thinking process component - dynamic during streaming, collapsed after
 function ThinkingBlock({ thinking, isStreaming, t }: { thinking: string; isStreaming?: boolean; t: (key: string) => string }) {
-  const [isOpen, setIsOpen] = useState(true);
+  // Only expanded by default when streaming
+  const [isOpen, setIsOpen] = useState(isStreaming || false);
+  const thinkingRef = useRef<HTMLDivElement>(null);
 
   if (!thinking) return null;
 
+  // Truncate thinking for preview (collapsed state)
+  const thinkingPreview = thinking.length > 80 
+    ? thinking.slice(0, 80).trim() + '...' 
+    : thinking;
+  
+  // Count thinking lines/chars for display
+  const thinkingLines = thinking.split('\n').length;
+  const thinkingChars = thinking.length;
+
+  // When streaming, show compact live view
+  if (isStreaming) {
+    // Get last few lines for live preview
+    const lines = thinking.split('\n');
+    const lastLines = lines.slice(-5).join('\n');
+    
+    return (
+      <div className="mb-3 rounded-lg overflow-hidden border border-purple-500/30 bg-gradient-to-r from-purple-500/5 to-transparent">
+        {/* Header with live indicator */}
+        <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 border-b border-purple-500/20">
+          <span className="text-sm">💭</span>
+          <span className="font-medium text-sm text-purple-700 dark:text-purple-300">
+            {t('thinkingProcess')}
+          </span>
+          <span className="flex items-center gap-1.5 ml-auto">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-500 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500"></span>
+            </span>
+            <span className="text-xs text-purple-500 animate-pulse">{t('thinking')}...</span>
+          </span>
+        </div>
+        
+        {/* Live thinking content - auto-scroll to bottom */}
+        <div 
+          ref={thinkingRef}
+          className="px-3 py-2 text-sm text-muted-foreground font-mono leading-relaxed max-h-32 overflow-y-auto"
+          style={{ scrollBehavior: 'smooth' }}
+        >
+          <div className="whitespace-pre-wrap break-words opacity-80">
+            {lastLines}
+            <span className="inline-block w-1.5 h-4 bg-purple-500/70 animate-pulse ml-0.5 align-middle" />
+          </div>
+        </div>
+        
+        {/* Stats footer */}
+        <div className="px-3 py-1 text-xs text-purple-500/60 border-t border-purple-500/10 bg-purple-500/5">
+          {thinkingLines} {t('lines')} · {Math.round(thinkingChars / 100) / 10}k {t('chars')}
+        </div>
+      </div>
+    );
+  }
+
+  // Completed state - compact collapsible
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="mb-2">
       <CollapsibleTrigger asChild>
-        <button className="flex items-center gap-2 w-full text-left p-2 rounded-md bg-purple-500/10 hover:bg-purple-500/20 transition-colors border border-purple-500/20">
-          <span className="text-sm">💭</span>
-          <span className="font-medium text-sm text-purple-700 dark:text-purple-300 flex-1">
-            {t('thinkingProcess')}
-          </span>
-          {isStreaming && (
-            <span className="animate-pulse text-purple-500">●</span>
+        <button className="flex items-center gap-2 w-full text-left px-2.5 py-1.5 rounded-md bg-purple-500/5 hover:bg-purple-500/10 transition-colors border border-purple-500/10 group">
+          <span className="text-xs opacity-60">💭</span>
+          {isOpen ? (
+            <span className="text-xs text-purple-600/70 dark:text-purple-400/70 flex-1">
+              {t('thinkingProcess')}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground/60 flex-1 truncate italic">
+              {thinkingPreview}
+            </span>
           )}
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-muted-foreground/40 group-hover:text-muted-foreground/60 transition-colors">
             {isOpen ? '▼' : '▶'}
           </span>
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 p-3 rounded-md bg-purple-500/5 border border-purple-500/10 text-sm text-muted-foreground whitespace-pre-wrap">
+        <div className="mt-1 px-3 py-2 rounded-md bg-purple-500/5 border border-purple-500/10 text-xs text-muted-foreground/80 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono leading-relaxed">
           {thinking}
         </div>
       </CollapsibleContent>
@@ -491,6 +452,28 @@ function MarkdownContent({ content, className }: { content: string; className?: 
   );
 }
 
+// Streaming activity indicator - rich display of what the agent is doing
+function StreamingActivity({ message, t }: { message: ChatMessage; t: (key: string) => string }) {
+  const extMsg = message as ChatMessage & { currentTool?: string; toolCount?: number; responseLength?: number; lastHeartbeat?: number };
+  const currentTool = extMsg.currentTool;
+  const tools = message.tool_use || [];
+  const completedTools = tools.filter(t => t.result).length;
+  const toolName = currentTool || (tools.length > 0 ? tools[tools.length - 1]?.tool : '');
+  
+  return (
+    <div className="flex items-center gap-2">
+      <span className="relative flex h-2 w-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+      </span>
+      <span className="text-sm text-muted-foreground">
+        {toolName || t('generating')}
+        {tools.length > 0 && <span className="text-xs ml-1 opacity-60">({completedTools}/{tools.length})</span>}
+      </span>
+    </div>
+  );
+}
+
 // Message bubble component - Clean Room Style with animations - Responsive
 function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: string) => string; locale: string }) {
   const isUser = message.role === 'user';
@@ -510,43 +493,33 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
           <ThinkingBlock thinking={message.thinking} isStreaming={isStreaming} t={t} />
         )}
         
-        {/* Message content */}
-        {message.content ? (
-          isUser ? (
-            <div className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</div>
-          ) : (
-            <MarkdownContent content={message.content} className="text-sm" />
-          )
-        ) : isStreaming ? (
-          <div className="flex flex-col gap-2">
-            {/* Show current activity status */}
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-              </span>
-              <span className="text-sm text-muted-foreground">
-                {(message as ChatMessage & { currentTool?: string }).currentTool 
-                  ? `${t('executing')} ${(message as ChatMessage & { currentTool?: string }).currentTool}...`
-                  : t('generating')
-                }
-              </span>
-            </div>
-            {/* Show heartbeat stats when available */}
-            {(message as ChatMessage & { toolCount?: number }).toolCount !== undefined && (
-              <div className="flex items-center gap-3 text-xs text-muted-foreground/70 pl-4">
-                <span className="flex items-center gap-1">
-                  <span>🔧</span>
-                  {(message as ChatMessage & { toolCount?: number }).toolCount} {t('toolCalls')}
-                </span>
-                <span className="flex items-center gap-1">
-                  <span>📝</span>
-                  {Math.round(((message as ChatMessage & { responseLength?: number }).responseLength || 0) / 100) / 10}k chars
-                </span>
-              </div>
-            )}
-          </div>
-        ) : null}
+        {/* Message content - prioritize showing meaningful content */}
+        {(() => {
+          const hasContent = message.content && message.content.trim().length > 0;
+          const hasThinking = message.thinking && message.thinking.trim().length > 0;
+          
+          // User message - simple display
+          if (isUser) {
+            return <div className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</div>;
+          }
+          
+          // Has content - show it (main case)
+          if (hasContent) {
+            return <MarkdownContent content={message.content} className="text-sm" />;
+          }
+          
+          // Streaming with no content yet - show rich activity indicator
+          if (isStreaming && !hasThinking) {
+            return <StreamingActivity message={message} t={t} />;
+          }
+          
+          // Only thinking, no other content yet
+          if (isStreaming && hasThinking && !hasContent) {
+            return null; // ThinkingBlock is already shown above
+          }
+          
+          return null;
+        })()}
         
         {/* Tool progress - current status only */}
         {!isUser && message.tool_use && message.tool_use.length > 0 && (

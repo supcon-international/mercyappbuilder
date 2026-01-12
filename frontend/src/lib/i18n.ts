@@ -42,14 +42,18 @@ export const translations = {
     streaming: '传输中',
     
     // Tool Progress
-    executing: '执行中...',
+    executing: '执行中',
     completed: '已完成',
     toolCalls: '个工具调用',
     result: '结果',
     taskProgress: '任务进度',
+    elapsedTime: '耗时',
     
     // Thinking
     thinkingProcess: '思考过程',
+    thinking: '思考中',
+    lines: '行',
+    chars: '字符',
     
     // View Panel
     view: '视图',
@@ -122,14 +126,18 @@ export const translations = {
     streaming: 'Streaming',
     
     // Tool Progress
-    executing: 'Executing...',
+    executing: 'Executing',
     completed: 'Completed',
     toolCalls: 'tool calls',
     result: 'Result',
     taskProgress: 'Task Progress',
+    elapsedTime: 'Elapsed',
     
     // Thinking
     thinkingProcess: 'Thinking Process',
+    thinking: 'Thinking',
+    lines: 'lines',
+    chars: 'chars',
     
     // View Panel
     view: 'View',

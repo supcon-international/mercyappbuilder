@@ -9,25 +9,84 @@ import type {
 } from '@/types';
 
 const API_BASE = '/api';
+const DEFAULT_TIMEOUT = 30000; // 30 seconds
+const MAX_RETRIES = 2;
+
+// Custom error class for API errors
+export class ApiError extends Error {
+  status: number;
+  isRetryable: boolean;
+  
+  constructor(message: string, status: number, isRetryable: boolean = false) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.isRetryable = isRetryable;
+  }
+}
 
 async function fetchApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit & { timeout?: number; retries?: number }
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-    ...options,
-  });
+  const { timeout = DEFAULT_TIMEOUT, retries = MAX_RETRIES, ...fetchOptions } = options || {};
+  
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...fetchOptions?.headers,
+        },
+        ...fetchOptions,
+        signal: controller.signal,
+      });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        const isRetryable = response.status >= 500 || response.status === 429;
+        throw new ApiError(
+          error.detail || `HTTP ${response.status}`,
+          response.status,
+          isRetryable
+        );
+      }
+
+      return response.json();
+    } catch (err) {
+      clearTimeout(timeoutId);
+      
+      if (err instanceof ApiError) {
+        if (!err.isRetryable || attempt === retries) {
+          throw err;
+        }
+        lastError = err;
+      } else if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          throw new ApiError('Request timeout', 408, true);
+        }
+        // Network errors are retryable
+        if (attempt === retries) {
+          throw new ApiError(err.message || 'Network error', 0, false);
+        }
+        lastError = err;
+      }
+      
+      // Wait before retry (exponential backoff)
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
+      }
+    }
   }
-
-  return response.json();
+  
+  throw lastError || new ApiError('Unknown error', 0, false);
 }
 
 export const api = {

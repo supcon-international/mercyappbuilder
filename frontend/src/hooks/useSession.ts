@@ -294,7 +294,7 @@ export function useChat(sessionId: string | null) {
             const inputDelta = chunk.content as string;
             const toolId = (chunk as unknown as { tool_id: string }).tool_id;
             const updated = updateLastAssistantMessage(currentMessages, (msg) => {
-              if (!msg.tool_use || msg.tool_use.length === 0) return {};
+              if (!msg.tool_use || !Array.isArray(msg.tool_use) || msg.tool_use.length === 0) return {};
               const tools = [...msg.tool_use];
               const toolIndex = tools.findIndex((t: ToolUse & { id?: string }) => t.id === toolId);
               if (toolIndex !== -1) {
@@ -326,7 +326,7 @@ export function useChat(sessionId: string | null) {
           else if (chunkType === 'tool_result') {
             const resultContent = chunk.content as string;
             const updated = updateLastAssistantMessage(currentMessages, (msg) => {
-              if (!msg.tool_use || msg.tool_use.length === 0) return {};
+              if (!msg.tool_use || !Array.isArray(msg.tool_use) || msg.tool_use.length === 0) return {};
               const tools = [...msg.tool_use];
               const lastTool = { ...tools[tools.length - 1] };
               lastTool.result = resultContent;

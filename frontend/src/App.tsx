@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { SessionList } from '@/components/SessionList';
 import { ChatPanel } from '@/components/ChatPanel';
 import { ViewPanel } from '@/components/ViewPanel';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/contexts/I18nContext';
 import { api } from '@/lib/api';
@@ -13,7 +14,7 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(false);
   const { t, locale, toggleLocale } = useI18n();
   
-  // Auto-show view when a viewable project is detected
+  // Auto-show view ONLY when build is complete and running
   const [viewAutoShown, setViewAutoShown] = useState<string | null>(null);
   
   useEffect(() => {
@@ -22,12 +23,13 @@ function App() {
     // Don't auto-show if already shown for this session or if view is already open
     if (showView || viewAutoShown === selectedSession.session_id) return;
     
-    // Check view status periodically
+    // Check view status periodically - only auto-show when RUNNING (build complete)
     const checkView = async () => {
       try {
         const status = await api.getViewStatus(selectedSession.session_id);
-        // Auto-show view if running or if project exists (not_started means project found)
-        if (status.status === 'running' || (status.status === 'not_started' && status.project_dir)) {
+        // Only auto-show view if already running (user triggered build or previous session)
+        // Do NOT auto-show for not_started - wait for user to manually start
+        if (status.status === 'running') {
           setShowView(true);
           setViewAutoShown(selectedSession.session_id);
         }
@@ -36,9 +38,9 @@ function App() {
       }
     };
     
-    // Check immediately and then every 5 seconds while streaming
+    // Check immediately and then every 10 seconds (reduced frequency)
     checkView();
-    const interval = setInterval(checkView, 5000);
+    const interval = setInterval(checkView, 10000);
     
     return () => clearInterval(interval);
   }, [selectedSession?.session_id, showView, viewAutoShown]);
@@ -176,7 +178,9 @@ function App() {
           `}
           style={showView ? { width: `${chatWidth}%` } : undefined}
         >
-          <ChatPanel session={selectedSession} />
+          <ErrorBoundary>
+            <ChatPanel session={selectedSession} />
+          </ErrorBoundary>
         </section>
 
         {/* Resize Handle */}
@@ -195,20 +199,24 @@ function App() {
             className="p-2 sm:p-4 min-w-0 hidden md:block"
             style={{ width: `${100 - chatWidth}%` }}
           >
-            <ViewPanel
-              sessionId={selectedSession?.session_id || null}
-              onClose={() => setShowView(false)}
-            />
+            <ErrorBoundary>
+              <ViewPanel
+                sessionId={selectedSession?.session_id || null}
+                onClose={() => setShowView(false)}
+              />
+            </ErrorBoundary>
           </section>
         )}
         
         {/* Mobile View (full width) */}
         {showView && (
           <section className="w-full p-2 sm:p-4 md:hidden">
-            <ViewPanel
-              sessionId={selectedSession?.session_id || null}
-              onClose={() => setShowView(false)}
-            />
+            <ErrorBoundary>
+              <ViewPanel
+                sessionId={selectedSession?.session_id || null}
+                onClose={() => setShowView(false)}
+              />
+            </ErrorBoundary>
           </section>
         )}
       </main>

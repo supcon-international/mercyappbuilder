@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -79,22 +79,14 @@ export function ViewPanel({ sessionId, onClose }: ViewPanelProps) {
     }
   }, [sessionId]);
 
-  // Auto-start view when panel is opened and status is not_started
-  const [autoStartAttempted, setAutoStartAttempted] = useState(false);
-  // Track if user manually stopped - don't auto-restart after manual stop
-  const manuallyStoppedRef = useRef(false);
-  
-  useEffect(() => {
-    // Reset flags when session changes
-    setAutoStartAttempted(false);
-    manuallyStoppedRef.current = false;
-  }, [sessionId]);
+  // No auto-start - user must click Build button manually
+  // This prevents starting view before project is fully generated
   
   useEffect(() => {
     fetchStatus();
-    // Poll status while building or not_started (for auto-start)
+    // Poll status while building
     const interval = setInterval(() => {
-      if (status?.status === 'building' || status?.status === 'not_started') {
+      if (status?.status === 'building') {
         fetchStatus();
       }
     }, 2000);
@@ -126,25 +118,9 @@ export function ViewPanel({ sessionId, onClose }: ViewPanelProps) {
     }
   }, [sessionId]);
   
-  // Auto-start view when panel is opened (but not after manual stop)
-  useEffect(() => {
-    if (
-      sessionId && 
-      status?.status === 'not_started' && 
-      !loading && 
-      !autoStartAttempted &&
-      !manuallyStoppedRef.current  // Don't auto-start if user manually stopped
-    ) {
-      setAutoStartAttempted(true);
-      handleStart();
-    }
-  }, [sessionId, status?.status, loading, autoStartAttempted, handleStart]);
-
   const handleStop = async () => {
     if (!sessionId) return;
     setLoading(true);
-    // Mark as manually stopped to prevent auto-restart
-    manuallyStoppedRef.current = true;
     try {
       await api.stopView(sessionId);
       setStatus(null);

@@ -502,8 +502,9 @@ async def proxy_view(session_id: str, path: str, request: Request) -> Response:
         body = await request.body()
     
     # Forward headers (filter out hop-by-hop headers)
+    # Keep accept-encoding so we don't ask for compressed content from static server
     headers = {}
-    skip_headers = {'host', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade'}
+    skip_headers = {'host', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'accept-encoding'}
     for key, value in request.headers.items():
         if key.lower() not in skip_headers:
             headers[key] = value
@@ -518,30 +519,18 @@ async def proxy_view(session_id: str, path: str, request: Request) -> Response:
                 follow_redirects=False,
             )
             
-            # Filter response headers
+            # Filter response headers (keep content-encoding for proper decompression)
             response_headers = {}
-            skip_response_headers = {'transfer-encoding', 'connection', 'content-encoding'}
+            skip_response_headers = {'transfer-encoding', 'connection'}
             for key, value in response.headers.items():
                 if key.lower() not in skip_response_headers:
                     response_headers[key] = value
             
+            # Prevent CDN caching to avoid encoding mismatch issues
+            response_headers['cache-control'] = 'no-store, no-cache, must-revalidate'
+            
             content = response.content
             content_type = response.headers.get('content-type', '')
-            
-            # Inject <base> tag to fix relative paths for built apps
-            if 'text/html' in content_type:
-                try:
-                    html = content.decode('utf-8')
-                    base_tag = f'<base href="/view/{session_id}/">'
-                    # Inject <base> after <head>
-                    if '<head>' in html and '<base' not in html.lower():
-                        html = html.replace('<head>', f'<head>\n    {base_tag}', 1)
-                        content = html.encode('utf-8')
-                        # Update content-length if present
-                        if 'content-length' in response_headers:
-                            response_headers['content-length'] = str(len(content))
-                except Exception:
-                    pass  # If injection fails, use original content
             
             return Response(
                 content=content,

@@ -26,9 +26,10 @@ import { useState } from 'react';
 // Claude 4.5 model options
 const CLAUDE_MODELS = [
   { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', thinking: true, description: '最强大，支持思考' },
-  { id: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5', thinking: true, description: '平衡性能，支持思考' },
+  { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', thinking: true, description: '平衡性能，支持思考' },
   { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', thinking: false, description: '强大稳定' },
   { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', thinking: false, description: '快速高效' },
+  { id: 'claude-haiku-4-5-20251212', name: 'Claude Haiku 4.5', thinking: false, description: '最快速，成本最低' },
 ];
 
 interface SessionListProps {
@@ -206,13 +207,18 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                       ×
                     </Button>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs text-muted-foreground">
                       {session.message_count} {t('messages')}
                     </span>
                     <span className="text-xs text-muted-foreground/50">·</span>
                     <span className="text-xs text-muted-foreground">
                       {formatTime(session.last_activity)}
+                    </span>
+                    <span className="text-xs text-muted-foreground/50">·</span>
+                    <span className="text-xs text-primary/70 font-medium">
+                      {session.model.includes('opus') ? 'Opus' : 
+                       session.model.includes('haiku') ? 'Haiku' : 'Sonnet'}
                     </span>
                   </div>
                 </div>
