@@ -1,11 +1,16 @@
-# claude.md — Manufacturing Web App (Pure Frontend + localStorage, Seeded Mock Data Only)
+# claude.md — Manufacturing Web App
 To avoid wasting time and tokens, prefer **installing and importing** proven frameworks and base components instead of generating large amounts of boilerplate code.
 - MAKE SURE YOUR THE NPM RUN DEV WONT GIVE ME A DEFAULT LANDING PAGE OF VITE+REACT or A BLANK PAGE
 ## Framework & UI Baseline (Mandatory)
+
+
+MAKE SURE ALL FUNCTIONS ARE INTEREACTIVE
 - Use **Vite + React + TypeScript** as the project framework (no Next.js).
+
+
 - Use **TailwindCSS + shadcn/ui** for base UI components. Do not hand-roll foundational components.
 - Prefer adding components via the **shadcn CLI** and importing them, rather than generating custom equivalents.
-
+When generating components, always use Tailwind utility classes. Ensure all primary colors use CSS variables defined in :root (e.g., var(--primary)). DO NOT create new .css files; keep all styles within the TSX files for maximum portability.
 ### Dependency-First Output (Mandatory)
 - Start with **install commands** for Vite/Tailwind/shadcn and any minimal utilities.
 - Prefer **small targeted patches** over dumping full files.

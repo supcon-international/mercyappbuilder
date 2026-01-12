@@ -198,6 +198,61 @@ class PreviewManager:
             # Dev mode: Start the dev server
             return await self._start_dev_preview(session_id, project_dir, port)
     
+    def _configure_vite_for_proxy(self, project_dir: str) -> None:
+        """Configure Vite to disable HMR for remote preview through proxy/tunnel."""
+        import json
+        
+        vite_config_ts = os.path.join(project_dir, "vite.config.ts")
+        vite_config_js = os.path.join(project_dir, "vite.config.js")
+        
+        # HMR disable snippet to inject
+        hmr_disable_comment = "// HMR disabled for remote preview"
+        hmr_config = "server: { hmr: false },"
+        
+        for config_path in [vite_config_ts, vite_config_js]:
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r') as f:
+                        content = f.read()
+                    
+                    # Skip if already configured
+                    if 'hmr: false' in content or 'hmr:false' in content:
+                        return
+                    
+                    # Try to inject hmr: false into existing server config
+                    if 'server:' in content or 'server :' in content:
+                        # Already has server config, try to add hmr: false
+                        import re
+                        # Match server: { ... } and add hmr: false
+                        pattern = r'(server\s*:\s*\{)'
+                        if re.search(pattern, content):
+                            content = re.sub(pattern, r'\1 hmr: false,', content)
+                            with open(config_path, 'w') as f:
+                                f.write(content)
+                            print(f"[PREVIEW] Injected hmr: false into existing server config")
+                            return
+                    
+                    # No server config, add one
+                    # Find defineConfig({ and add server config after
+                    if 'defineConfig({' in content:
+                        content = content.replace(
+                            'defineConfig({',
+                            f'defineConfig({{\n  {hmr_disable_comment}\n  {hmr_config}'
+                        )
+                        with open(config_path, 'w') as f:
+                            f.write(content)
+                        print(f"[PREVIEW] Added server.hmr: false to vite config")
+                        return
+                    
+                    # Fallback: try to add before export default
+                    if 'export default' in content:
+                        # Can't easily inject, skip
+                        print(f"[PREVIEW] Could not inject hmr config, WebSocket errors may occur")
+                        return
+                        
+                except Exception as e:
+                    print(f"[PREVIEW] Failed to configure Vite HMR: {e}")
+    
     def _detect_project_type(self, project_dir: str) -> str:
         """Detect the type of web project."""
         package_json_path = os.path.join(project_dir, "package.json")
@@ -261,6 +316,12 @@ class PreviewManager:
             
             if project_type == 'vite':
                 # Vite project: use npm run dev with Vite-specific args
+                # Disable HMR to avoid WebSocket issues through proxy/tunnel
+                env['VITE_HMR_DISABLE'] = 'true'
+                
+                # Create/update vite.config.ts to disable HMR for remote preview
+                self._configure_vite_for_proxy(project_dir)
+                
                 cmd = ["npm", "run", "dev", "--", "--port", str(port), "--host", "0.0.0.0", "--base", base_path]
             elif project_type == 'live-server':
                 # Live-server project: use npx live-server directly
