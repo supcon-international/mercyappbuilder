@@ -10,12 +10,26 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useSessions } from '@/hooks/useSession';
 import { useI18n } from '@/contexts/I18nContext';
 import type { Session } from '@/types';
 import { useState } from 'react';
+
+// Claude 4.5 model options
+const CLAUDE_MODELS = [
+  { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', thinking: true, description: '最强大，支持思考' },
+  { id: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5', thinking: true, description: '平衡性能，支持思考' },
+  { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', thinking: false, description: '强大稳定' },
+  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', thinking: false, description: '快速高效' },
+];
 
 interface SessionListProps {
   selectedSession: Session | null;
@@ -30,7 +44,8 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
     ? '基于 claude.md 完成应用构建' 
     : 'Build applications based on claude.md';
   const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompt);
-  const [model, setModel] = useState('claude-sonnet-4-20250514');
+  // Default to Opus 4.5 with thinking enabled
+  const [model, setModel] = useState('claude-opus-4-5-20251101');
 
   useEffect(() => {
     fetchSessions();
@@ -105,13 +120,25 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                   <label htmlFor="model" className="text-sm font-medium">
                     {t('model')}
                   </label>
-                  <Input
-                    id="model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="claude-sonnet-4-20250514"
-                    className="h-9"
-                  />
+                  <Select value={model} onValueChange={setModel}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder={t('selectModel')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CLAUDE_MODELS.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{m.name}</span>
+                            {m.thinking && (
+                              <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                                {locale === 'zh' ? '思考' : 'Thinking'}
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid gap-2">
                   <label htmlFor="system-prompt" className="text-sm font-medium">
