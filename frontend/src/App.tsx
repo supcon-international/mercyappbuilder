@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { SessionList } from '@/components/SessionList';
 import { ChatPanel } from '@/components/ChatPanel';
-import { PreviewPanel } from '@/components/PreviewPanel';
+import { ViewPanel } from '@/components/ViewPanel';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/contexts/I18nContext';
 import { api } from '@/lib/api';
@@ -9,27 +9,27 @@ import type { Session } from '@/types';
 
 function App() {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
+  const [showView, setShowView] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const { t, locale, toggleLocale } = useI18n();
   
-  // Auto-show preview when a previewable project is detected
-  const [previewAutoShown, setPreviewAutoShown] = useState<string | null>(null);
+  // Auto-show view when a viewable project is detected
+  const [viewAutoShown, setViewAutoShown] = useState<string | null>(null);
   
   useEffect(() => {
     if (!selectedSession?.session_id) return;
     
-    // Don't auto-show if already shown for this session or if preview is already open
-    if (showPreview || previewAutoShown === selectedSession.session_id) return;
+    // Don't auto-show if already shown for this session or if view is already open
+    if (showView || viewAutoShown === selectedSession.session_id) return;
     
-    // Check preview status periodically
-    const checkPreview = async () => {
+    // Check view status periodically
+    const checkView = async () => {
       try {
-        const status = await api.getPreviewStatus(selectedSession.session_id);
-        // Auto-show preview if running or if project exists (not_started means project found)
+        const status = await api.getViewStatus(selectedSession.session_id);
+        // Auto-show view if running or if project exists (not_started means project found)
         if (status.status === 'running' || (status.status === 'not_started' && status.project_dir)) {
-          setShowPreview(true);
-          setPreviewAutoShown(selectedSession.session_id);
+          setShowView(true);
+          setViewAutoShown(selectedSession.session_id);
         }
       } catch {
         // Ignore errors
@@ -37,11 +37,11 @@ function App() {
     };
     
     // Check immediately and then every 5 seconds while streaming
-    checkPreview();
-    const interval = setInterval(checkPreview, 5000);
+    checkView();
+    const interval = setInterval(checkView, 5000);
     
     return () => clearInterval(interval);
-  }, [selectedSession?.session_id, showPreview, previewAutoShown]);
+  }, [selectedSession?.session_id, showView, viewAutoShown]);
   
   // Resizable panel state
   const [chatWidth, setChatWidth] = useState(50); // percentage
@@ -122,13 +122,13 @@ function App() {
           </Button>
           {selectedSession && (
             <Button
-              variant={showPreview ? 'default' : 'outline'}
+              variant={showView ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setShowPreview(!showPreview)}
+              onClick={() => setShowView(!showView)}
               className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
             >
-              <span className="hidden sm:inline">{showPreview ? t('hidePreview') : t('showPreview')}</span>
-              <span className="sm:hidden">{showPreview ? '✕' : '👁'}</span>
+              <span className="hidden sm:inline">{showView ? t('hideView') : t('showView')}</span>
+              <span className="sm:hidden">{showView ? '✕' : '👁'}</span>
             </Button>
           )}
         </div>
@@ -172,15 +172,15 @@ function App() {
         <section 
           className={`
             p-2 sm:p-4 min-w-0
-            ${showPreview ? 'hidden md:block' : 'flex-1'}
+            ${showView ? 'hidden md:block' : 'flex-1'}
           `}
-          style={showPreview ? { width: `${chatWidth}%` } : undefined}
+          style={showView ? { width: `${chatWidth}%` } : undefined}
         >
           <ChatPanel session={selectedSession} />
         </section>
 
         {/* Resize Handle */}
-        {showPreview && (
+        {showView && (
           <div
             className="hidden md:flex w-1 hover:w-2 bg-border/50 hover:bg-primary/50 cursor-col-resize items-center justify-center transition-all group"
             onMouseDown={handleMouseDown}
@@ -189,25 +189,25 @@ function App() {
           </div>
         )}
 
-        {/* Preview Panel - Responsive & Resizable */}
-        {showPreview && (
+        {/* View Panel - Responsive & Resizable */}
+        {showView && (
           <section 
             className="p-2 sm:p-4 min-w-0 hidden md:block"
             style={{ width: `${100 - chatWidth}%` }}
           >
-            <PreviewPanel
+            <ViewPanel
               sessionId={selectedSession?.session_id || null}
-              onClose={() => setShowPreview(false)}
+              onClose={() => setShowView(false)}
             />
           </section>
         )}
         
-        {/* Mobile Preview (full width) */}
-        {showPreview && (
+        {/* Mobile View (full width) */}
+        {showView && (
           <section className="w-full p-2 sm:p-4 md:hidden">
-            <PreviewPanel
+            <ViewPanel
               sessionId={selectedSession?.session_id || null}
-              onClose={() => setShowPreview(false)}
+              onClose={() => setShowView(false)}
             />
           </section>
         )}

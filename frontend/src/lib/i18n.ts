@@ -51,19 +51,22 @@ export const translations = {
     // Thinking
     thinkingProcess: '思考过程',
     
-    // Preview Panel
-    preview: '预览',
-    hidePreview: '隐藏预览',
-    showPreview: '预览',
+    // View Panel
+    view: '视图',
+    hideView: '隐藏视图',
+    showView: '视图',
+    building: '构建中',
+    buildingHint: '正在构建项目...',
+    build: '构建',
+    viewProject: '查看项目',
+    viewHint: '点击构建按钮构建并查看项目',
+    selectSessionView: '选择会话查看',
     running: '运行中',
     starting: '启动中...',
     stopped: '已停止',
     error: '错误',
     notStarted: '未启动',
     start: '启动',
-    previewProject: '预览项目',
-    previewHint: '点击启动按钮预览 web/ 目录下的项目',
-    selectSessionPreview: '选择会话预览',
     installingDeps: '正在安装依赖并启动服务器',
     
     // Language
@@ -128,19 +131,22 @@ export const translations = {
     // Thinking
     thinkingProcess: 'Thinking Process',
     
-    // Preview Panel
-    preview: 'Preview',
-    hidePreview: 'Hide Preview',
-    showPreview: 'Preview',
+    // View Panel
+    view: 'View',
+    hideView: 'Hide View',
+    showView: 'View',
+    building: 'Building',
+    buildingHint: 'Building project...',
+    build: 'Build',
+    viewProject: 'View Project',
+    viewHint: 'Click Build to build and view project',
+    selectSessionView: 'Select session to view',
     running: 'Running',
     starting: 'Starting...',
     stopped: 'Stopped',
     error: 'Error',
     notStarted: 'Not Started',
     start: 'Start',
-    previewProject: 'Preview Project',
-    previewHint: 'Click Start to preview the web/ directory project',
-    selectSessionPreview: 'Select session to preview',
     installingDeps: 'Installing dependencies and starting server',
     
     // Language

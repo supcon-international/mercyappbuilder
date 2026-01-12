@@ -23,7 +23,7 @@ from .models import (
     SessionListResponse,
 )
 from .session import SessionManager
-from .preview import get_preview_manager, PreviewManager
+from .view import get_view_manager, ViewManager
 
 # Port configuration
 API_PORT = 8000
@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
     else:
         print(f"  Frontend:        Development mode (needs npm run dev)")
     print(f"  Preview Ports:   {PREVIEW_PORT_START}-{PREVIEW_PORT_END}")
-    print(f"  Preview Proxy:   /preview/{{session_id}}/")
+    print(f"  View Proxy:      /view/{{session_id}}/")
     print("=" * 60 + "\n")
     
     # Start background cleanup task
@@ -64,8 +64,8 @@ async def lifespan(app: FastAPI):
     yield
     
     # Cleanup preview servers
-    preview_mgr = get_preview_manager()
-    await preview_mgr.cleanup_all()
+    view_mgr = get_view_manager()
+    await view_mgr.cleanup_all()
     
     # Cleanup
     cleanup_task.cancel()
@@ -399,15 +399,12 @@ async def clear_session_history(session_id: str) -> dict:
 # Preview Server Endpoints
 # ============================================================================
 
-@app.post("/sessions/{session_id}/preview/start", tags=["Preview"])
-async def start_preview(session_id: str, request: Request, mode: str = 'dev') -> dict:
+@app.post("/sessions/{session_id}/view/start", tags=["View"])
+async def start_view(session_id: str, request: Request) -> dict:
     """
-    Start a preview server for the session's web project.
+    Start a view server for the session's web project (build mode only).
     
-    Looks for a web project (package.json) in the session's working directory.
-    
-    Args:
-        mode: 'dev' for development server (with HMR), 'build' for production build + static server
+    Builds the project and serves the static files.
     """
     manager = get_session_manager()
     session = await manager.get_session(session_id)
@@ -415,14 +412,11 @@ async def start_preview(session_id: str, request: Request, mode: str = 'dev') ->
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     
-    if mode not in ('dev', 'build'):
-        raise HTTPException(status_code=400, detail="Mode must be 'dev' or 'build'")
-    
-    preview_mgr = get_preview_manager()
-    server = await preview_mgr.start_preview(session_id, session.working_directory, mode=mode)
+    view_mgr = get_view_manager()
+    server = await view_mgr.start_view(session_id, session.working_directory)
     
     # Use relative path for proxy URL (works with any domain/protocol)
-    proxy_url = f"/preview/{session_id}/" if server.status == 'running' else None
+    proxy_url = f"/view/{session_id}/" if server.status == 'running' else None
     
     return {
         'session_id': server.session_id,
@@ -431,17 +425,15 @@ async def start_preview(session_id: str, request: Request, mode: str = 'dev') ->
         'local_url': f'http://localhost:{server.port}' if server.status == 'running' else None,
         'project_dir': server.project_dir,
         'status': server.status,
-        'mode': server.mode,
-        'error': server.error,
-        'verified_port': server.verified_port
+        'error': server.error
     }
 
 
-@app.post("/sessions/{session_id}/preview/stop", tags=["Preview"])
-async def stop_preview(session_id: str) -> dict:
-    """Stop the preview dev server for a session."""
-    preview_mgr = get_preview_manager()
-    success = await preview_mgr.stop_preview(session_id)
+@app.post("/sessions/{session_id}/view/stop", tags=["View"])
+async def stop_view(session_id: str) -> dict:
+    """Stop the view server for a session."""
+    view_mgr = get_view_manager()
+    success = await view_mgr.stop_view(session_id)
     
     return {
         'session_id': session_id,
@@ -449,11 +441,11 @@ async def stop_preview(session_id: str) -> dict:
     }
 
 
-@app.get("/sessions/{session_id}/preview/status", tags=["Preview"])
-async def get_preview_status(session_id: str, request: Request) -> dict:
-    """Get the status of the preview dev server for a session."""
-    preview_mgr = get_preview_manager()
-    status = await preview_mgr.get_status(session_id)
+@app.get("/sessions/{session_id}/view/status", tags=["View"])
+async def get_view_status(session_id: str, request: Request) -> dict:
+    """Get the status of the view server for a session."""
+    view_mgr = get_view_manager()
+    status = await view_mgr.get_status(session_id)
     
     if status is None:
         return {
@@ -468,44 +460,37 @@ async def get_preview_status(session_id: str, request: Request) -> dict:
     
     # Use relative path for proxy URL (works with any domain/protocol)
     if status.get('status') == 'running':
-        status['url'] = f"/preview/{session_id}/"
+        status['url'] = f"/view/{session_id}/"
         status['local_url'] = f"http://localhost:{status.get('port')}"
     
     return status
 
 
 # ============================================================================
-# Preview Proxy (for public access through tunnel)
+# View Proxy (for public access through tunnel)
 # ============================================================================
 
-@app.api_route("/preview/{session_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["Preview"])
-async def proxy_preview(session_id: str, path: str, request: Request) -> Response:
+@app.api_route("/view/{session_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["View"])
+async def proxy_view(session_id: str, path: str, request: Request) -> Response:
     """
-    Reverse proxy for preview dev servers.
+    Reverse proxy for view servers.
     
-    This allows accessing preview servers through the main API port,
+    This allows accessing view servers through the main API port,
     enabling public access when the API is exposed via tunnel.
     Injects <base> tag in HTML responses to fix relative paths.
     """
-    preview_mgr = get_preview_manager()
-    status = await preview_mgr.get_status(session_id)
+    view_mgr = get_view_manager()
+    status = await view_mgr.get_status(session_id)
     
     if status is None or status.get('status') != 'running':
-        raise HTTPException(status_code=503, detail="Preview server not running")
+        raise HTTPException(status_code=503, detail="View server not running")
     
     port = status.get('port')
     if not port:
-        raise HTTPException(status_code=503, detail="Preview server port not available")
+        raise HTTPException(status_code=503, detail="View server port not available")
     
-    project_type = status.get('project_type', 'unknown')
-    
-    # Vite is started with --base=/preview/{session_id}/, so include full path
-    # Other servers (live-server, static, etc.) don't have base path configured
-    if project_type == 'vite':
-        target_url = f"http://localhost:{port}/preview/{session_id}/{path}"
-    else:
-        # For non-Vite projects, access directly at root
-        target_url = f"http://localhost:{port}/{path}"
+    # Build mode always serves static files directly
+    target_url = f"http://localhost:{port}/{path}"
     
     # Forward query parameters
     if request.query_params:
@@ -543,11 +528,11 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
             content = response.content
             content_type = response.headers.get('content-type', '')
             
-            # For non-Vite projects, inject <base> tag to fix relative paths
-            if project_type != 'vite' and 'text/html' in content_type:
+            # Inject <base> tag to fix relative paths for built apps
+            if 'text/html' in content_type:
                 try:
                     html = content.decode('utf-8')
-                    base_tag = f'<base href="/preview/{session_id}/">'
+                    base_tag = f'<base href="/view/{session_id}/">'
                     # Inject <base> after <head>
                     if '<head>' in html and '<base' not in html.lower():
                         html = html.replace('<head>', f'<head>\n    {base_tag}', 1)
@@ -565,15 +550,15 @@ async def proxy_preview(session_id: str, path: str, request: Request) -> Respons
                 media_type=content_type or None,
             )
     except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot connect to preview server")
+        raise HTTPException(status_code=503, detail="Cannot connect to view server")
     except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Preview server timeout")
+        raise HTTPException(status_code=504, detail="View server timeout")
 
 
-@app.get("/preview/{session_id}", tags=["Preview"])
-async def proxy_preview_root(session_id: str, request: Request) -> Response:
-    """Proxy root path for preview."""
-    return await proxy_preview(session_id, "", request)
+@app.get("/view/{session_id}", tags=["View"])
+async def proxy_view_root(session_id: str, request: Request) -> Response:
+    """Proxy root path for view."""
+    return await proxy_view(session_id, "", request)
 
 
 # ============================================================================

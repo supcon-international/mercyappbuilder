@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useI18n } from '@/contexts/I18nContext';
-import type { PreviewStatus } from '@/lib/api';
+import type { ViewStatus } from '@/lib/api';
 
 // SVG Icons
 const PlayIcon = () => (
@@ -57,21 +57,21 @@ const LoaderIcon = () => (
   </svg>
 );
 
-interface PreviewPanelProps {
+interface ViewPanelProps {
   sessionId: string | null;
   onClose: () => void;
 }
 
-export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
+export function ViewPanel({ sessionId, onClose }: ViewPanelProps) {
   const { t } = useI18n();
-  const [status, setStatus] = useState<PreviewStatus | null>(null);
+  const [status, setStatus] = useState<ViewStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchStatus = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const result = await api.getPreviewStatus(sessionId);
+      const result = await api.getViewStatus(sessionId);
       setStatus(result);
       setError(null);
     } catch (err) {
@@ -79,7 +79,7 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
     }
   }, [sessionId]);
 
-  // Auto-start preview when panel is opened and status is not_started
+  // Auto-start view when panel is opened and status is not_started
   const [autoStartAttempted, setAutoStartAttempted] = useState(false);
   // Track if user manually stopped - don't auto-restart after manual stop
   const manuallyStoppedRef = useRef(false);
@@ -92,9 +92,9 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
   
   useEffect(() => {
     fetchStatus();
-    // Poll status while starting or not_started (for auto-start)
+    // Poll status while building or not_started (for auto-start)
     const interval = setInterval(() => {
-      if (status?.status === 'starting' || status?.status === 'not_started') {
+      if (status?.status === 'building' || status?.status === 'not_started') {
         fetchStatus();
       }
     }, 2000);
@@ -106,27 +106,27 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.startPreview(sessionId);
+      const result = await api.startView(sessionId);
       setStatus(result);
       
-      // If starting, poll for updates
-      if (result.status === 'starting') {
+      // If building, poll for updates
+      if (result.status === 'building') {
         const checkInterval = setInterval(async () => {
-          const updated = await api.getPreviewStatus(sessionId);
+          const updated = await api.getViewStatus(sessionId);
           setStatus(updated);
-          if (updated.status !== 'starting') {
+          if (updated.status !== 'building') {
             clearInterval(checkInterval);
           }
-        }, 1500);
+        }, 2000);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start preview');
+      setError(err instanceof Error ? err.message : 'Failed to start view');
     } finally {
       setLoading(false);
     }
   }, [sessionId]);
   
-  // Auto-start preview when panel is opened (but not after manual stop)
+  // Auto-start view when panel is opened (but not after manual stop)
   useEffect(() => {
     if (
       sessionId && 
@@ -146,17 +146,17 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
     // Mark as manually stopped to prevent auto-restart
     manuallyStoppedRef.current = true;
     try {
-      await api.stopPreview(sessionId);
+      await api.stopView(sessionId);
       setStatus(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop preview');
+      setError(err instanceof Error ? err.message : 'Failed to stop view');
     } finally {
       setLoading(false);
     }
   };
 
   const handleRefresh = () => {
-    const iframe = document.getElementById('preview-iframe') as HTMLIFrameElement;
+    const iframe = document.getElementById('view-iframe') as HTMLIFrameElement;
     if (iframe && status?.url) {
       iframe.src = status.url;
     }
@@ -169,28 +169,28 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
           <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-accent/50 flex items-center justify-center transition-transform duration-300 hover:scale-110">
             <MonitorIcon />
           </div>
-          <p className="font-medium">{t('selectSessionPreview')}</p>
+          <p className="font-medium">{t('selectSessionView')}</p>
         </div>
       </Card>
     );
   }
 
   const isRunning = status?.status === 'running';
-  const isStarting = status?.status === 'starting';
+  const isBuilding = status?.status === 'building';
 
   return (
     <Card className="h-full flex flex-col gap-0 py-0 overflow-hidden border-border/50 shadow-sm card-hover">
       <CardHeader className="py-2 sm:py-2.5 px-2 sm:px-3 flex-shrink-0 border-b border-border/30">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1 sm:gap-1.5 min-w-0 flex-1">
-            <CardTitle className="text-xs sm:text-sm font-medium">{t('preview')}</CardTitle>
+            <CardTitle className="text-xs sm:text-sm font-medium">{t('view')}</CardTitle>
             {status && (
               <Badge
-                variant={isRunning ? 'default' : isStarting ? 'secondary' : 'outline'}
+                variant={isRunning ? 'default' : isBuilding ? 'secondary' : 'outline'}
                 className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2"
               >
                 {status.status === 'running' && t('running')}
-                {status.status === 'starting' && t('starting')}
+                {status.status === 'building' && t('building')}
                 {status.status === 'stopped' && t('stopped')}
                 {status.status === 'error' && t('error')}
                 {status.status === 'not_started' && t('notStarted')}
@@ -219,7 +219,7 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
                 </Button>
               </>
             )}
-            {(isRunning || isStarting) && (
+            {(isRunning || isBuilding) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -251,37 +251,37 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
           </div>
         )}
         
-        {isStarting && (
+        {isBuilding && (
           <div className="h-full flex items-center justify-center text-muted-foreground">
             <div className="text-center">
               <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
                 <LoaderIcon />
               </div>
-              <p className="font-medium">{t('starting')}</p>
-              <p className="text-xs mt-1 opacity-70">{t('installingDeps')}</p>
+              <p className="font-medium">{t('building')}</p>
+              <p className="text-xs mt-1 opacity-70">{t('buildingHint')}</p>
             </div>
           </div>
         )}
         
         {isRunning && status?.url && (
           <iframe
-            id="preview-iframe"
+            id="view-iframe"
             src={status.url}
             className="w-full h-full border-0 bg-white"
-            title="Preview"
+            title="View"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         )}
         
-        {!isRunning && !isStarting && !error && !status?.error && (
+        {!isRunning && !isBuilding && !error && !status?.error && (
           <div className="h-full flex items-center justify-center text-muted-foreground">
             <div className="text-center">
               <div className="w-20 h-20 mx-auto mb-5 rounded-2xl bg-accent/50 flex items-center justify-center">
                 <MonitorIcon />
               </div>
-              <p className="font-medium mb-1">{t('previewProject')}</p>
+              <p className="font-medium mb-1">{t('viewProject')}</p>
               <p className="text-xs mb-5 opacity-70 max-w-[200px] mx-auto">
-                {t('previewHint')}
+                {t('viewHint')}
               </p>
               <Button
                 variant="default"
@@ -291,7 +291,7 @@ export function PreviewPanel({ sessionId, onClose }: PreviewPanelProps) {
                 className="rounded-xl px-8 py-3 h-12 text-sm font-medium btn-glow flex items-center gap-2 mx-auto"
               >
                 <PlayIcon />
-                {loading ? t('starting') : t('start')}
+                {loading ? t('building') : t('build')}
               </Button>
             </div>
           </div>

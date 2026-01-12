@@ -167,27 +167,27 @@ export const api = {
     );
   },
 
-  // Preview
-  async startPreview(sessionId: string): Promise<PreviewStatus> {
-    return fetchApi<PreviewStatus>(`/sessions/${sessionId}/preview/start`, {
+  // View (build mode only)
+  async startView(sessionId: string): Promise<ViewStatus> {
+    return fetchApi<ViewStatus>(`/sessions/${sessionId}/view/start`, {
       method: 'POST',
     });
   },
 
-  async stopPreview(sessionId: string): Promise<{ session_id: string; stopped: boolean }> {
-    return fetchApi(`/sessions/${sessionId}/preview/stop`, {
+  async stopView(sessionId: string): Promise<{ session_id: string; stopped: boolean }> {
+    return fetchApi(`/sessions/${sessionId}/view/stop`, {
       method: 'POST',
     });
   },
 
-  async getPreviewStatus(sessionId: string): Promise<PreviewStatus> {
-    return fetchApi<PreviewStatus>(`/sessions/${sessionId}/preview/status`);
+  async getViewStatus(sessionId: string): Promise<ViewStatus> {
+    return fetchApi<ViewStatus>(`/sessions/${sessionId}/view/status`);
   },
 };
 
-export interface PreviewStatus {
+export interface ViewStatus {
   session_id: string;
-  status: 'not_started' | 'starting' | 'running' | 'stopped' | 'error';
+  status: 'not_started' | 'building' | 'running' | 'stopped' | 'error';
   url: string | null;  // Proxy URL for public access
   local_url: string | null;  // Direct localhost URL
   port: number | null;
