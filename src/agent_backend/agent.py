@@ -242,11 +242,17 @@ class AgentExecutor:
         thinking_text = ""
         tool_results: list[dict[str, Any]] = []
         query_error: Exception | None = None
+        stream_active = True
+
+        async def emit(event: dict[str, Any]) -> None:
+            """Emit events only while the client stream is active."""
+            if stream_active:
+                await event_queue.put(event)
         
         # Permission request callback - immediately puts event in queue
         async def on_permission_request(request: PermissionRequest) -> None:
             print(f"[PERMISSION] Request created: {request.tool_name} - {request.request_id}")
-            await event_queue.put({
+            await emit({
                 "type": "permission_request",
                 "request_id": request.request_id,
                 "tool_name": request.tool_name,
@@ -272,7 +278,7 @@ class AgentExecutor:
                 while query_running:
                     await asyncio.sleep(HEARTBEAT_INTERVAL)
                     if query_running:  # Check again after sleep
-                        await event_queue.put({
+                        await emit({
                             "type": "heartbeat",
                             "session_id": self.session.session_id,
                             "response_length": len(response_text),
@@ -322,7 +328,7 @@ class AgentExecutor:
                                     text_chunk = delta.get("text", "")
                                     if text_chunk:
                                         response_text += text_chunk
-                                        await event_queue.put({
+                                        await emit({
                                             "type": "text_delta",
                                             "content": text_chunk,
                                             "session_id": self.session.session_id
@@ -332,7 +338,7 @@ class AgentExecutor:
                                     thinking_chunk = delta.get("thinking", "")
                                     if thinking_chunk:
                                         thinking_text += thinking_chunk
-                                        await event_queue.put({
+                                        await emit({
                                             "type": "thinking_delta",
                                             "content": thinking_chunk,
                                             "session_id": self.session.session_id
@@ -341,7 +347,7 @@ class AgentExecutor:
                                 elif delta_type == "input_json_delta":
                                     json_chunk = delta.get("partial_json", "")
                                     if json_chunk:
-                                        await event_queue.put({
+                                        await emit({
                                             "type": "tool_input_delta",
                                             "content": json_chunk,
                                             "tool_id": current_tool_id,
@@ -361,14 +367,14 @@ class AgentExecutor:
                                         "input": {},
                                         "id": tool_id,
                                     })
-                                    await event_queue.put({
+                                    await emit({
                                         "type": "tool_use_start",
                                         "content": {"tool": tool_name, "id": tool_id},
                                         "session_id": self.session.session_id
                                     })
                                 
                                 elif block_type == "thinking":
-                                    await event_queue.put({
+                                    await emit({
                                         "type": "thinking_start",
                                         "content": "",
                                         "session_id": self.session.session_id
@@ -376,7 +382,7 @@ class AgentExecutor:
                             
                             elif event_type == "content_block_stop":
                                 if current_tool_id:
-                                    await event_queue.put({
+                                    await emit({
                                         "type": "tool_use_end",
                                         "content": {"id": current_tool_id},
                                         "session_id": self.session.session_id
@@ -400,7 +406,7 @@ class AgentExecutor:
                                     tool["result"] = result_content
                                     break
                         
-                        await event_queue.put({
+                        await emit({
                             "type": "tool_result",
                             "content": result_content,
                             "session_id": self.session.session_id
@@ -428,7 +434,7 @@ class AgentExecutor:
                 )
                 print(f"[SAVE] Message saved successfully")
                 
-                await event_queue.put({
+                await emit({
                     "type": "done",
                     "content": response_text,
                     "session_id": self.session.session_id,
@@ -448,7 +454,8 @@ class AgentExecutor:
                         tool_use=tool_results if tool_results else None,
                         thinking=thinking_text if thinking_text else None
                     )
-                await event_queue.put(None)
+                if stream_active:
+                    await event_queue.put(None)
                 return  # Exit cleanly
                 
             except Exception as e:
@@ -471,7 +478,7 @@ class AgentExecutor:
                         tool_use=tool_results if tool_results else None,
                         thinking=thinking_text if thinking_text else None
                     )
-                await event_queue.put({
+                await emit({
                     "type": "error",
                     "content": str(e),
                     "session_id": self.session.session_id
@@ -484,7 +491,10 @@ class AgentExecutor:
                     await heartbeat_task
                 except asyncio.CancelledError:
                     pass
-                await event_queue.put(None)  # Signal end
+                if stream_active:
+                    await event_queue.put(None)  # Signal end
+                async with self.session._lock:
+                    self.session.status = SessionStatus.ACTIVE
         
         query_task = None
         try:
@@ -505,16 +515,7 @@ class AgentExecutor:
                 raise query_error
                 
         except (asyncio.CancelledError, GeneratorExit):
-            # Client disconnected - cancel the query task and wait for it to save
-            print(f"[STREAM] Generator cancelled for session {self.session.session_id}")
-            if query_task and not query_task.done():
-                query_task.cancel()
-                try:
-                    await query_task
-                except asyncio.CancelledError:
-                    pass  # Expected
-            raise
-                
-        finally:
-            async with self.session._lock:
-                self.session.status = SessionStatus.ACTIVE
+            # Client disconnected - keep query running in background
+            print(f"[STREAM] Client disconnected, continuing in background for session {self.session.session_id}")
+            stream_active = False
+            return

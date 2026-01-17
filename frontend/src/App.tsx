@@ -16,7 +16,8 @@ function App() {
   const [viewPanelTab, setViewPanelTab] = useState<'preview' | 'production' | 'uns' | 'flow'>('preview');
   const [showSidebar, setShowSidebar] = useState(false); // Mobile sidebar
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // Desktop sidebar collapse
-  const { t, locale, toggleLocale } = useI18n();
+  const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
+  const { t } = useI18n();
   const { sessions } = useSessions();
   
   // Auto-show view ONLY when build is complete and running
@@ -105,74 +106,19 @@ function App() {
       <div className="glow-orb glow-orb-2 hidden sm:block" aria-hidden="true" />
       <div className="glow-orb glow-orb-3 hidden sm:block" aria-hidden="true" />
 
-      {/* Header - Responsive */}
-      <header className="relative z-20 border-b border-border/50 px-3 sm:px-6 py-2 sm:py-3 flex items-center justify-between bg-card/50 backdrop-blur-md">
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Mobile menu button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowSidebar(!showSidebar)}
-            className="sm:hidden h-8 w-8 p-0"
-          >
-            <span className="text-lg">{showSidebar ? '✕' : '☰'}</span>
-          </Button>
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-primary flex items-center justify-center logo-pulse">
-            <span className="text-primary-foreground font-bold text-xs sm:text-sm">T0</span>
-          </div>
-          <h1 className="text-sm sm:text-base font-semibold tracking-tight hidden xs:block">{t('appName')}</h1>
-        </div>
-        <div className="flex items-center gap-1 sm:gap-2">
-          {/* Language Toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleLocale}
-            className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium"
-          >
-            {locale === 'zh' ? 'EN' : '中'}
-          </Button>
-          {selectedSession && (
-            <>
-              <Button
-                variant={showView && viewPanelTab === 'preview' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  if (showView && viewPanelTab === 'preview') {
-                    setShowView(false);
-                    return;
-                  }
-                  setViewPanelTab('preview');
-                  setShowView(true);
-                }}
-                className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
-              >
-                <span className="hidden sm:inline">{showView && viewPanelTab === 'preview' ? t('hideView') : t('showView')}</span>
-                <span className="sm:hidden">{showView && viewPanelTab === 'preview' ? '✕' : '👁'}</span>
-              </Button>
-              <Button
-                variant={showView && viewPanelTab === 'flow' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  if (showView && viewPanelTab === 'flow') {
-                    setShowView(false);
-                    return;
-                  }
-                  setViewPanelTab('flow');
-                  setShowView(true);
-                }}
-                className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
-              >
-                <span className="hidden sm:inline">{showView && viewPanelTab === 'flow' ? t('hideFlow') : t('showFlow')}</span>
-                <span className="sm:hidden">{showView && viewPanelTab === 'flow' ? '✕' : '🧩'}</span>
-              </Button>
-            </>
-          )}
-        </div>
-      </header>
-
       {/* Main Content - Responsive */}
       <main ref={containerRef} className="relative z-10 flex-1 flex min-h-0 bg-muted/20 backdrop-blur-sm">
+        {/* Mobile sidebar toggle */}
+        {!showSidebar && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowSidebar(true)}
+            className="sm:hidden fixed top-3 left-3 z-30 h-9 w-9 p-0 rounded-lg bg-card/80 border border-border/50 shadow-md"
+          >
+            <span className="text-lg">☰</span>
+          </Button>
+        )}
         {/* Session List Sidebar - Mobile overlay / Desktop collapsible */}
         <aside className={`
           ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
@@ -181,9 +127,10 @@ function App() {
           inset-y-0 left-0
           z-30 sm:z-auto
           ${sidebarCollapsed ? 'sm:w-12' : 'w-64 sm:w-56 md:w-64 lg:w-72'}
-          border-r border-border/50 
-          bg-card/95 sm:bg-card/30 
-          backdrop-blur-md sm:backdrop-blur-sm 
+          border-r border-border/60
+          bg-card/95 sm:bg-card/70
+          backdrop-blur-xl sm:backdrop-blur-xl
+          shadow-lg z-20 
           flex-shrink-0
           transition-all duration-300 ease-in-out
           pt-14 sm:pt-0
@@ -236,6 +183,8 @@ function App() {
                 setSelectedSession(session);
                 setShowSidebar(false); // Close sidebar on mobile after selection
               }}
+              isCreateOpen={isCreateSessionOpen}
+              onOpenCreateChange={setIsCreateSessionOpen}
             />
           )}
         </aside>
@@ -261,6 +210,17 @@ function App() {
               session={selectedSession}
               selectedComponentContext={selectedComponentContext}
               onClearComponentContext={() => setSelectedComponentContext(null)}
+              onCreateSession={() => setIsCreateSessionOpen(true)}
+              showView={showView}
+              viewPanelTab={viewPanelTab}
+              onToggleView={() => {
+                if (showView && viewPanelTab === 'preview') {
+                  setShowView(false);
+                  return;
+                }
+                setViewPanelTab('preview');
+                setShowView(true);
+              }}
             />
           </ErrorBoundary>
         </section>

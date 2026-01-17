@@ -35,12 +35,22 @@ const CLAUDE_MODELS = [
 interface SessionListProps {
   selectedSession: Session | null;
   onSelectSession: (session: Session) => void;
+  isCreateOpen?: boolean;
+  onOpenCreateChange?: (open: boolean) => void;
 }
 
-export function SessionList({ selectedSession, onSelectSession }: SessionListProps) {
+export function SessionList({
+  selectedSession,
+  onSelectSession,
+  isCreateOpen,
+  onOpenCreateChange,
+}: SessionListProps) {
   const { sessions, loading, error, fetchSessions, createSession, deleteSession, updateSessionName } = useSessions();
-  const { t, locale } = useI18n();
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const { t, locale, toggleLocale } = useI18n();
+  const [localCreateOpen, setLocalCreateOpen] = useState(false);
+  const createDialogOpen = isCreateOpen !== undefined ? isCreateOpen : localCreateOpen;
+  const setCreateDialogOpen = onOpenCreateChange || setLocalCreateOpen;
+  
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renamingSession, setRenamingSession] = useState<Session | null>(null);
   const defaultSystemPrompt = locale === 'zh' 
@@ -128,8 +138,22 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
   return (
     <div className="h-full flex flex-col">
       <div className="p-3 sm:p-4 pb-2 sm:pb-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('sessions')}</h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Logo" className="w-10 h-10 object-contain" />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleLocale}
+              className="rounded-lg h-7 px-2 text-xs font-medium"
+            >
+              {locale === 'zh' ? 'EN' : '中'}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-2 flex items-center w-full">
           <Dialog
             open={createDialogOpen}
             onOpenChange={(open) => {
@@ -140,7 +164,7 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
             }}
           >
             <DialogTrigger asChild>
-              <Button size="sm" className="rounded-lg h-7 px-2 sm:px-2.5 text-xs font-medium btn-glow">{t('newSession')}</Button>
+              <Button size="sm" className="w-full rounded-lg h-10 px-4 text-sm font-bold btn-glow">{t('newSession')}</Button>
             </DialogTrigger>
             <DialogContent className="w-[95vw] max-w-md mx-auto">
               <DialogHeader>
@@ -284,11 +308,11 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${getStatusColor(session.status)} ${session.status === 'active' ? 'animate-pulse' : ''}`} />
-                      <span className="text-xs font-medium text-foreground">
+                      <span className={`text-sm truncate max-w-[140px] ${selectedSession?.session_id === session.session_id ? 'font-bold' : 'font-semibold'}`}>
                         {title}
                       </span>
                       {name && (
-                        <span className="font-mono text-[10px] text-muted-foreground">
+                        <span className="font-mono text-xs text-muted-foreground">
                           {session.session_id.slice(0, 8)}
                         </span>
                       )}

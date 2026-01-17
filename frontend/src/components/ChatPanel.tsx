@@ -21,6 +21,10 @@ interface ChatPanelProps {
   session: Session | null;
   selectedComponentContext?: string | null;
   onClearComponentContext?: () => void;
+  onCreateSession?: () => void;
+  showView?: boolean;
+  viewPanelTab?: 'preview' | 'production' | 'uns' | 'flow';
+  onToggleView?: () => void;
 }
 
 // Extended tool type with live streaming info
@@ -36,6 +40,27 @@ interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed';
   id?: string;
 }
+
+type WizardKey = 'goal' | 'roles' | 'modules' | 'data' | 'flow' | 'uns';
+
+type WizardData = Record<WizardKey, string>;
+
+type WizardStep = {
+  key: WizardKey;
+  title: string;
+  hint: string;
+  placeholder: string;
+  optional?: boolean;
+};
+
+const initialWizardData: WizardData = {
+  goal: '',
+  roles: '',
+  modules: '',
+  data: '',
+  flow: '',
+  uns: '',
+};
 
 // Extract the latest todos from tool_use array
 function extractLatestTodos(tools: ToolUse[]): TodoItem[] | null {
@@ -361,6 +386,267 @@ function PermissionRequestCard({
   );
 }
 
+function buildWizardPrompt(steps: WizardStep[], data: WizardData, locale: string) {
+  const sections = steps
+    .map((step) => {
+      const value = data[step.key]?.trim();
+      if (!value) return null;
+      return `${step.title}:\n${value}`;
+    })
+    .filter(Boolean);
+
+  if (sections.length === 0) return '';
+
+  const header = locale === 'zh' ? '结构化需求：' : 'Structured requirements:';
+  return [header, ...sections].join('\n\n');
+}
+
+function WizardPanel({
+  steps,
+  stepIndex,
+  data,
+  onStepChange,
+  onDataChange,
+  onBack,
+  onNext,
+  onSkip,
+  onSend,
+  canSend,
+  disabled,
+  stepLabel,
+  t,
+}: {
+  steps: WizardStep[];
+  stepIndex: number;
+  data: WizardData;
+  onStepChange: (index: number) => void;
+  onDataChange: (key: WizardKey, value: string) => void;
+  onBack: () => void;
+  onNext: () => void;
+  onSkip: () => void;
+  onSend: () => void;
+  canSend: boolean;
+  disabled: boolean;
+  stepLabel: string;
+  t: (key: string) => string;
+}) {
+  const step = steps[stepIndex];
+  const [mousePosition, setMousePosition] = useState({ x: 50, y: 50 }); // Initial center-ish
+  const [isHovering, setIsHovering] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Random movement effect when not hovering
+  useEffect(() => {
+    if (isHovering) return;
+
+    const moveRandomly = () => {
+      if (cardRef.current) {
+        const { clientWidth, clientHeight } = cardRef.current;
+        setMousePosition({
+          x: Math.random() * clientWidth,
+          y: Math.random() * clientHeight,
+        });
+      }
+    };
+
+    // Initial move
+    moveRandomly();
+
+    const interval = setInterval(moveRandomly, 4000); // Move every 4 seconds
+    return () => clearInterval(interval);
+  }, [isHovering]);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (cardRef.current) {
+      const rect = cardRef.current.getBoundingClientRect();
+      setMousePosition({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+      setIsHovering(true);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovering(false);
+  };
+  
+  return (
+    <div 
+      ref={cardRef}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      className="relative rounded-xl border border-primary/20 bg-gradient-to-br from-white/5 via-primary/5 to-black/5 shadow-lg shadow-primary/5 p-3 sm:p-4 mb-3 overflow-hidden group backdrop-blur-md"
+    >
+      {/* Metallic Sheen Overlay */}
+      <div 
+        className="pointer-events-none absolute inset-0 z-0 opacity-30"
+        style={{
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.4) 0%, transparent 40%, transparent 60%, rgba(255,255,255,0.1) 100%)',
+        }}
+      />
+      
+      {/* Interactive Glow Effect - Moving Ball with multiple layers (Reduced Intensity) */}
+      {/* Outer glow layer */}
+      <div 
+        className="pointer-events-none absolute rounded-full blur-3xl"
+        style={{
+          width: '800px',
+          height: '800px',
+          left: mousePosition.x,
+          top: mousePosition.y,
+          transform: 'translate(-50%, -50%)',
+          background: 'radial-gradient(circle, rgba(178, 237, 29, 0.1) 0%, transparent 70%)',
+          transition: isHovering ? 'opacity 0.2s' : 'left 4s ease-in-out, top 4s ease-in-out, opacity 0.5s',
+          opacity: isHovering ? 0.6 : 0.3,
+        }}
+      />
+      {/* Inner bright glow layer */}
+      <div 
+        className="pointer-events-none absolute rounded-full blur-2xl"
+        style={{
+          width: '400px',
+          height: '400px',
+          left: mousePosition.x,
+          top: mousePosition.y,
+          transform: 'translate(-50%, -50%)',
+          background: 'radial-gradient(circle, rgba(178, 237, 29, 0.3) 0%, rgba(178, 237, 29, 0.05) 50%, transparent 70%)',
+          transition: isHovering ? 'opacity 0.2s' : 'left 4s ease-in-out, top 4s ease-in-out, opacity 0.5s',
+          opacity: isHovering ? 0.7 : 0.4,
+        }}
+      />
+      {/* Core bright spot */}
+      <div 
+        className="pointer-events-none absolute rounded-full blur-xl"
+        style={{
+          width: '200px',
+          height: '200px',
+          left: mousePosition.x,
+          top: mousePosition.y,
+          transform: 'translate(-50%, -50%)',
+          background: 'radial-gradient(circle, rgba(178, 237, 29, 0.4) 0%, rgba(178, 237, 29, 0.1) 60%, transparent 80%)',
+          transition: isHovering ? 'opacity 0.2s' : 'left 4s ease-in-out, top 4s ease-in-out, opacity 0.5s',
+          opacity: isHovering ? 0.8 : 0.5,
+        }}
+      />
+      
+      {/* Content wrapper to ensure z-index above glow */}
+      <div className="relative z-10">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-primary/10 text-primary text-sm font-bold border border-primary/20">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+              </span>
+              {t('wizardTitle')}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">{t('wizardSubtitle')}</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onSkip}
+            className="h-7 px-2 text-xs hover:bg-primary/10 hover:text-primary"
+            disabled={disabled}
+          >
+            {t('wizardSkip')}
+          </Button>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-muted/50 rounded-full overflow-hidden backdrop-blur-sm">
+            <div
+              className="h-full bg-primary shadow-[0_0_10px_rgba(178,237,29,0.5)] transition-all duration-500 ease-out"
+              style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs font-mono text-muted-foreground min-w-[3rem] text-right">{stepLabel}</span>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {steps.map((item, index) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onStepChange(index)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-all duration-200 ${
+                index === stepIndex
+                  ? 'bg-primary text-primary-foreground border-primary shadow-[0_0_15px_rgba(178,237,29,0.4)] scale-105 font-bold'
+                  : 'border-border/40 text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-primary/5'
+              }`}
+              disabled={disabled}
+            >
+              <span className="opacity-70 text-xs mr-1">{index + 1}.</span>
+              <span>{item.title}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-xl border border-primary/10 bg-card/40 backdrop-blur-md p-1">
+          <div className="p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-sm font-bold text-foreground/90">{step.title}</span>
+              {step.optional && (
+                <Badge variant="secondary" className="text-xs h-5 px-1.5 bg-muted/50 text-muted-foreground border-0">
+                  {t('wizardOptional')}
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm font-light text-muted-foreground mb-3 leading-relaxed">{step.hint}</p>
+            <Textarea
+              value={data[step.key]}
+              onChange={(e) => onDataChange(step.key, e.target.value)}
+              placeholder={step.placeholder}
+              rows={4}
+              className="resize-none rounded-lg border-primary/10 bg-background/50 focus:bg-background/80 focus:border-primary/50 transition-all duration-300 text-sm shadow-inner"
+              disabled={disabled}
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            disabled={stepIndex === 0 || disabled}
+            className="h-8 px-3 text-muted-foreground hover:text-foreground"
+          >
+            {t('wizardBack')}
+          </Button>
+          
+          <div className="flex items-center gap-2">
+            {stepIndex < steps.length - 1 ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={onNext}
+                disabled={disabled}
+                className="h-8 px-4 btn-glow rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground font-medium shadow-lg shadow-primary/20"
+              >
+                {t('wizardNext')}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                onClick={onSend}
+                disabled={!canSend || disabled}
+                className="h-8 px-4 btn-glow rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/25"
+              >
+                {t('wizardSend')}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Markdown 渲染组件
 function MarkdownContent({ content, className }: { content: string; className?: string }) {
   return (
@@ -559,7 +845,105 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
   );
 }
 
-export function ChatPanel({ session, selectedComponentContext, onClearComponentContext }: ChatPanelProps) {
+// Metallic Button Component
+function MetallicButton({ onClick, children, className }: { onClick: () => void, children: React.ReactNode, className?: string }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setMousePos({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+      setIsHovering(true);
+    }
+  };
+
+  return (
+    <button
+      ref={btnRef}
+      onClick={onClick}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setIsHovering(false)}
+      className={`relative overflow-hidden rounded-xl bg-primary text-primary-foreground font-bold shadow-[0_10px_20px_-5px_rgba(178,237,29,0.4)] transition-all duration-300 hover:scale-105 active:scale-95 group ${className}`}
+    >
+      {/* Base metallic gradient */}
+      <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-black/10" />
+      
+      {/* Border highlight */}
+      <div className="absolute inset-0 rounded-xl border border-white/20 pointer-events-none" />
+
+      {/* Mouse interaction glow */}
+      <div 
+        className="absolute pointer-events-none transition-opacity duration-300"
+        style={{
+          width: '300px',
+          height: '300px',
+          left: mousePos.x,
+          top: mousePos.y,
+          transform: 'translate(-50%, -50%)',
+          background: 'radial-gradient(circle, rgba(255,255,255,0.8) 0%, transparent 60%)',
+          opacity: isHovering ? 0.4 : 0,
+          mixBlendMode: 'overlay'
+        }}
+      />
+
+      {/* Idle periodic sheen */}
+      <div 
+        className={`absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent -skew-x-12 ${!isHovering ? 'animate-shimmer' : 'opacity-0'}`} 
+        style={{ animationDuration: '3s' }}
+      />
+
+      {/* Content */}
+      <span className="relative z-10 flex items-center justify-center gap-2">
+        {children}
+      </span>
+    </button>
+  );
+}
+
+function BuildMeFlip() {
+  const words = ['MES', 'EHS', 'WMS', 'SCM', 'LIMS', 'QMS', 'EMS'];
+  const [index, setIndex] = useState(0);
+  const [animating, setAnimating] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAnimating(true);
+      setTimeout(() => {
+        setIndex((prev) => (prev + 1) % words.length);
+        setAnimating(false);
+      }, 500);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <span className="inline-flex items-center min-w-[3ch] text-primary font-bold">
+      <span
+        className={`inline-block transition-all duration-500 transform ${
+          animating ? '-translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
+        }`}
+      >
+        {words[index]}
+      </span>
+    </span>
+  );
+}
+
+export function ChatPanel({
+  session,
+  selectedComponentContext,
+  onClearComponentContext,
+  onCreateSession,
+  showView,
+  viewPanelTab,
+  onToggleView,
+}: ChatPanelProps) {
   const {
     messages,
     loading,
@@ -573,7 +957,23 @@ export function ChatPanel({ session, selectedComponentContext, onClearComponentC
   } = useChat(session?.session_id || null);
   const { t, locale } = useI18n();
   const [input, setInput] = useState('');
+  const [wizardStep, setWizardStep] = useState(0);
+  const [wizardData, setWizardData] = useState<WizardData>(initialWizardData);
+  const [wizardDismissed, setWizardDismissed] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!session?.session_id) return;
+    setWizardStep(0);
+    setWizardData(initialWizardData);
+    setWizardDismissed(false);
+  }, [session?.session_id]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      setWizardDismissed(true);
+    }
+  }, [messages.length]);
 
   useEffect(() => {
     // Auto scroll to bottom
@@ -592,6 +992,9 @@ export function ChatPanel({ session, selectedComponentContext, onClearComponentC
 
     const message = input.trim();
     setInput('');
+    setWizardDismissed(true);
+    setWizardStep(0);
+    setWizardData(initialWizardData);
     await sendMessageStream(message, selectedComponentContext);
     if (onClearComponentContext) {
       onClearComponentContext();
@@ -605,31 +1008,143 @@ export function ChatPanel({ session, selectedComponentContext, onClearComponentC
     }
   };
 
+  const wizardSteps: WizardStep[] = [
+    {
+      key: 'goal',
+      title: t('wizardGoalTitle'),
+      hint: t('wizardGoalHint'),
+      placeholder: t('wizardGoalPlaceholder'),
+    },
+    {
+      key: 'roles',
+      title: t('wizardRolesTitle'),
+      hint: t('wizardRolesHint'),
+      placeholder: t('wizardRolesPlaceholder'),
+    },
+    {
+      key: 'modules',
+      title: t('wizardModulesTitle'),
+      hint: t('wizardModulesHint'),
+      placeholder: t('wizardModulesPlaceholder'),
+    },
+    {
+      key: 'data',
+      title: t('wizardDataTitle'),
+      hint: t('wizardDataHint'),
+      placeholder: t('wizardDataPlaceholder'),
+    },
+    {
+      key: 'flow',
+      title: t('wizardFlowTitle'),
+      hint: t('wizardFlowHint'),
+      placeholder: t('wizardFlowPlaceholder'),
+    },
+    {
+      key: 'uns',
+      title: t('wizardUnsTitle'),
+      hint: t('wizardUnsHint'),
+      placeholder: t('wizardUnsPlaceholder'),
+      optional: true,
+    },
+  ];
+
+  const wizardDisabled = loading || streaming || session?.status === 'closed';
+  const showWizard = messages.length === 0 && !wizardDismissed;
+  const wizardStepLabel = locale === 'zh'
+    ? `步骤 ${wizardStep + 1} / ${wizardSteps.length}`
+    : `Step ${wizardStep + 1} / ${wizardSteps.length}`;
+  const canSendWizard = wizardSteps.some((step) => wizardData[step.key].trim().length > 0);
+
+  const handleWizardSend = async () => {
+    if (!canSendWizard || wizardDisabled) return;
+    const prompt = buildWizardPrompt(wizardSteps, wizardData, locale);
+    if (!prompt) return;
+    setWizardDismissed(true);
+    setWizardStep(0);
+    setWizardData(initialWizardData);
+    await sendMessageStream(prompt, selectedComponentContext);
+    if (onClearComponentContext) {
+      onClearComponentContext();
+    }
+  };
+
   if (!session) {
     return (
-      <Card className="h-full flex items-center justify-center gap-0 py-0 border-border/50 shadow-sm card-hover">
-        <div className="text-center text-muted-foreground">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-accent/50 flex items-center justify-center transition-transform duration-300 hover:scale-110">
-            <span className="text-2xl">💬</span>
-          </div>
-          <p className="font-medium">{t('selectSession')}</p>
-          <p className="text-sm mt-1 opacity-70">{t('orCreateNew')}</p>
+      <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 relative overflow-hidden">
+        {/* Background ambient glow */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-[100px] animate-pulse" style={{ animationDuration: '8s' }} />
+          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-blue-500/10 rounded-full blur-[80px] animate-pulse" style={{ animationDuration: '10s' }} />
         </div>
-      </Card>
+
+        <div className="relative z-10 flex flex-col items-center max-w-lg text-center">
+          {/* Logo */}
+          <div className="mb-8 relative group">
+            <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+            <img 
+              src="/logo.png" 
+              alt="Logo" 
+              className="w-24 h-24 sm:w-32 sm:h-32 object-contain drop-shadow-2xl relative z-10 transition-transform duration-500 group-hover:scale-110" 
+            />
+          </div>
+
+          <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-tight">
+            Build me a <BuildMeFlip /> now
+          </h1>
+          
+          <p className="text-muted-foreground mb-10 text-lg">
+            Start with a session and iterate quickly.
+          </p>
+
+          <MetallicButton 
+            onClick={onCreateSession || (() => {})} 
+            className="px-10 py-4 text-lg w-full sm:w-auto"
+          >
+            Start Building
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </MetallicButton>
+        </div>
+      </div>
     );
   }
 
   return (
     <Card className="h-full flex flex-col gap-0 py-0 overflow-hidden border-border/50 shadow-sm card-hover">
-      <CardHeader className="py-2 sm:py-2.5 px-3 sm:px-4 flex-shrink-0 border-b border-border/30">
+      <CardHeader className="sticky top-0 z-30 py-2 sm:py-2.5 px-3 sm:px-4 flex-shrink-0 border-b border-border/30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-xs sm:text-sm font-medium">{t('conversation')}</CardTitle>
+            <CardTitle className="text-sm font-bold">{t('conversation')}</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate opacity-70">
               {session.working_directory.split('/').slice(-2).join('/')}
             </p>
           </div>
-          <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {onToggleView && (
+              <Button
+                variant={showView && viewPanelTab === 'preview' ? 'default' : 'outline'}
+                size="sm"
+                onClick={onToggleView}
+                className="h-10 px-6 min-w-[140px] text-sm font-bold btn-glow bg-primary/90 hover:bg-primary text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50 transition-transform hover:scale-105"
+              >
+                {locale === 'zh'
+                  ? (showView && viewPanelTab === 'preview' ? '隐藏预览' : '预览')
+                  : (showView && viewPanelTab === 'preview' ? t('hideView') : t('showView'))}
+              </Button>
+            )}
+            {streaming && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={stopStreaming}
+                className="sm:hidden h-9 px-3 text-sm font-bold border-destructive/50 text-destructive hover:bg-destructive/10"
+              >
+                {t('stop')}
+              </Button>
+            )}
             <Badge variant="secondary" className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2 hidden sm:inline-flex">
               {session.model.split('-').slice(0,2).join('-')}
             </Badge>
@@ -660,14 +1175,33 @@ export function ChatPanel({ session, selectedComponentContext, onClearComponentC
                 </Button>
               </div>
             )}
+            {showWizard && (
+              <WizardPanel
+                steps={wizardSteps}
+                stepIndex={wizardStep}
+                data={wizardData}
+                onStepChange={setWizardStep}
+                onDataChange={(key, value) => setWizardData((prev) => ({ ...prev, [key]: value }))}
+                onBack={() => setWizardStep((prev) => Math.max(0, prev - 1))}
+                onNext={() => setWizardStep((prev) => Math.min(wizardSteps.length - 1, prev + 1))}
+                onSkip={() => setWizardDismissed(true)}
+                onSend={handleWizardSend}
+                canSend={canSendWizard}
+                disabled={wizardDisabled}
+                stepLabel={wizardStepLabel}
+                t={t as (key: string) => string}
+              />
+            )}
             {messages.length === 0 ? (
-              <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                <div className="text-center">
-                  <div className="text-4xl mb-4">🤖</div>
-                  <p>{t('startNewChat')}</p>
-                  <p className="text-sm mt-1">{t('agentWorkDir')}</p>
+              showWizard ? null : (
+                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <div className="text-4xl mb-4">🤖</div>
+                    <p>{t('startNewChat')}</p>
+                    <p className="text-sm mt-1">{t('agentWorkDir')}</p>
+                  </div>
                 </div>
-              </div>
+              )
             ) : (
               <>
                 {messages.map((message, index) => (
