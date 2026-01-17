@@ -260,6 +260,23 @@ export const api = {
     return fetchApi<ViewStatus>(`/sessions/${sessionId}/view/status`);
   },
 
+  // Preview (dev mode with HMR)
+  async startPreview(sessionId: string): Promise<PreviewStatus> {
+    return fetchApi<PreviewStatus>(`/sessions/${sessionId}/preview/start`, {
+      method: 'POST',
+    });
+  },
+
+  async stopPreview(sessionId: string): Promise<{ session_id: string; stopped: boolean }> {
+    return fetchApi(`/sessions/${sessionId}/preview/stop`, {
+      method: 'POST',
+    });
+  },
+
+  async getPreviewStatus(sessionId: string): Promise<PreviewStatus> {
+    return fetchApi<PreviewStatus>(`/sessions/${sessionId}/preview/status`);
+  },
+
   // Flow (shared Node-RED)
   async startFlow(): Promise<FlowStatus> {
     return fetchApi<FlowStatus>(`/flow/start`, {
@@ -275,6 +292,16 @@ export const api = {
 export interface ViewStatus {
   session_id: string;
   status: 'not_started' | 'building' | 'running' | 'stopped' | 'error';
+  url: string | null;  // Proxy URL for public access
+  local_url: string | null;  // Direct localhost URL
+  port: number | null;
+  project_dir: string | null;
+  error: string | null;
+}
+
+export interface PreviewStatus {
+  session_id: string;
+  status: 'not_started' | 'starting' | 'running' | 'stopped' | 'error';
   url: string | null;  // Proxy URL for public access
   local_url: string | null;  // Direct localhost URL
   port: number | null;

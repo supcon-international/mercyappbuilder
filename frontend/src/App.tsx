@@ -5,6 +5,7 @@ import { ViewPanel } from '@/components/ViewPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/contexts/I18nContext';
+import { useSessions } from '@/hooks/useSession';
 import { api } from '@/lib/api';
 import type { Session } from '@/types';
 
@@ -12,9 +13,11 @@ function App() {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [selectedComponentContext, setSelectedComponentContext] = useState<string | null>(null);
   const [showView, setShowView] = useState(false);
-  const [viewPanelTab, setViewPanelTab] = useState<'view' | 'uns' | 'flow'>('view');
-  const [showSidebar, setShowSidebar] = useState(false);
+  const [viewPanelTab, setViewPanelTab] = useState<'preview' | 'production' | 'uns' | 'flow'>('preview');
+  const [showSidebar, setShowSidebar] = useState(false); // Mobile sidebar
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false); // Desktop sidebar collapse
   const { t, locale, toggleLocale } = useI18n();
+  const { sessions } = useSessions();
   
   // Auto-show view ONLY when build is complete and running
   const [viewAutoShown, setViewAutoShown] = useState<string | null>(null);
@@ -33,7 +36,7 @@ function App() {
         // Do NOT auto-show for not_started - wait for user to manually start
         if (status.status === 'running') {
           setShowView(true);
-          setViewPanelTab('view');
+          setViewPanelTab('preview');
           setViewAutoShown(selectedSession.session_id);
         }
       } catch {
@@ -132,20 +135,20 @@ function App() {
           {selectedSession && (
             <>
               <Button
-                variant={showView && viewPanelTab === 'view' ? 'default' : 'outline'}
+                variant={showView && viewPanelTab === 'preview' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => {
-                  if (showView && viewPanelTab === 'view') {
+                  if (showView && viewPanelTab === 'preview') {
                     setShowView(false);
                     return;
                   }
-                  setViewPanelTab('view');
+                  setViewPanelTab('preview');
                   setShowView(true);
                 }}
                 className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
               >
-                <span className="hidden sm:inline">{showView && viewPanelTab === 'view' ? t('hideView') : t('showView')}</span>
-                <span className="sm:hidden">{showView && viewPanelTab === 'view' ? '✕' : '👁'}</span>
+                <span className="hidden sm:inline">{showView && viewPanelTab === 'preview' ? t('hideView') : t('showView')}</span>
+                <span className="sm:hidden">{showView && viewPanelTab === 'preview' ? '✕' : '👁'}</span>
               </Button>
               <Button
                 variant={showView && viewPanelTab === 'flow' ? 'default' : 'outline'}
@@ -170,28 +173,71 @@ function App() {
 
       {/* Main Content - Responsive */}
       <main ref={containerRef} className="relative z-10 flex-1 flex min-h-0 bg-muted/20 backdrop-blur-sm">
-        {/* Session List Sidebar - Mobile overlay / Desktop fixed */}
+        {/* Session List Sidebar - Mobile overlay / Desktop collapsible */}
         <aside className={`
           ${showSidebar ? 'translate-x-0' : '-translate-x-full'}
           sm:translate-x-0
           fixed sm:relative
           inset-y-0 left-0
           z-30 sm:z-auto
-          w-64 sm:w-56 md:w-64 lg:w-72
+          ${sidebarCollapsed ? 'sm:w-12' : 'w-64 sm:w-56 md:w-64 lg:w-72'}
           border-r border-border/50 
           bg-card/95 sm:bg-card/30 
           backdrop-blur-md sm:backdrop-blur-sm 
           flex-shrink-0
-          transition-transform duration-300 ease-in-out
+          transition-all duration-300 ease-in-out
           pt-14 sm:pt-0
+          overflow-hidden
         `}>
-          <SessionList
-            selectedSession={selectedSession}
-            onSelectSession={(session) => {
-              setSelectedSession(session);
-              setShowSidebar(false); // Close sidebar on mobile after selection
-            }}
-          />
+          {/* Collapse toggle button - Desktop only */}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-10 w-5 h-10 items-center justify-center bg-card border border-border/50 rounded-full shadow-sm hover:bg-accent transition-colors"
+            title={sidebarCollapsed ? t('expandSidebar') : t('collapseSidebar')}
+          >
+            <span className={`text-xs text-muted-foreground transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`}>
+              ‹
+            </span>
+          </button>
+          
+          {/* Collapsed state - show only icons */}
+          {sidebarCollapsed ? (
+            <div className="hidden sm:flex flex-col items-center py-4 gap-2">
+              <Button
+                size="sm"
+                className="w-8 h-8 p-0 rounded-lg btn-glow"
+                onClick={() => setSidebarCollapsed(false)}
+                title={t('newSession')}
+              >
+                +
+              </Button>
+              {sessions.slice(0, 5).map((session) => (
+                <button
+                  key={session.session_id}
+                  onClick={() => {
+                    setSelectedSession(session);
+                    setSidebarCollapsed(false);
+                  }}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition-colors ${
+                    selectedSession?.session_id === session.session_id
+                      ? 'bg-primary/15 border border-primary/30'
+                      : 'hover:bg-accent/50'
+                  }`}
+                  title={session.display_name || session.session_id.slice(0, 8)}
+                >
+                  {(session.display_name || session.session_id)[0].toUpperCase()}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <SessionList
+              selectedSession={selectedSession}
+              onSelectSession={(session) => {
+                setSelectedSession(session);
+                setShowSidebar(false); // Close sidebar on mobile after selection
+              }}
+            />
+          )}
         </aside>
         
         {/* Mobile overlay backdrop */}

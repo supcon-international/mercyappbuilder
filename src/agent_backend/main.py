@@ -27,6 +27,7 @@ from .models import (
 from .session import SessionManager
 from .view import get_view_manager, ViewManager
 from .flow import get_flow_manager
+from .preview import get_preview_manager
 
 # Port configuration
 API_PORT = 8000
@@ -71,7 +72,11 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Cleanup preview servers
+    # Cleanup preview servers (dev mode)
+    preview_mgr = get_preview_manager()
+    await preview_mgr.cleanup_all()
+
+    # Cleanup view servers (build mode)
     view_mgr = get_view_manager()
     await view_mgr.cleanup_all()
 
@@ -97,6 +102,74 @@ async def periodic_cleanup():
         await asyncio.sleep(300)  # Run every 5 minutes
         if session_manager:
             await session_manager.cleanup_inactive_sessions(max_idle_minutes=60)
+
+
+async def _auto_start_preview_and_flow(session_id: str):
+    """
+    Auto-start preview server and import flow.json after conversation completes.
+    This runs in background to not block the response stream.
+    """
+    try:
+        if not session_manager:
+            return
+        
+        session = await session_manager.get_session(session_id)
+        if not session:
+            return
+        
+        session_dir = session.working_directory
+        
+        # Check if there's a web project (has package.json)
+        package_json_path = os.path.join(session_dir, "package.json")
+        if not os.path.exists(package_json_path):
+            return  # Not a web project, skip
+        
+        print(f"[AUTO] Detected web project in session {session_id}")
+        
+        # Auto-start preview server if not already running
+        preview_mgr = get_preview_manager()
+        status = await preview_mgr.get_status(session_id)
+        
+        if status is None or status.get("status") not in ("running", "starting"):
+            print(f"[AUTO] Starting preview server for {session_id}...")
+            try:
+                await preview_mgr.start_preview(
+                    session_id=session_id,
+                    session_dir=session_dir,
+                    hmr_host="appbuilder.m3rcyzzz.club",  # Default HMR host
+                    hmr_client_port=443
+                )
+                print(f"[AUTO] Preview server started for {session_id}")
+            except Exception as e:
+                print(f"[AUTO] Failed to start preview: {e}")
+        
+        # Auto-import flow.json if it exists
+        flow_paths = [
+            os.path.join(session_dir, "dist", "flow.json"),
+            os.path.join(session_dir, "build", "flow.json"),
+            os.path.join(session_dir, "flow.json"),
+            os.path.join(session_dir, "public", "flow.json"),
+        ]
+        
+        flow_json_path = None
+        for path in flow_paths:
+            if os.path.exists(path):
+                flow_json_path = path
+                break
+        
+        if flow_json_path:
+            print(f"[AUTO] Found flow.json at {flow_json_path}, importing to Node-RED...")
+            try:
+                flow_mgr = get_flow_manager()
+                result = await flow_mgr.import_flow_from_file(session_id, flow_json_path)
+                if result.get("success"):
+                    print(f"[AUTO] Flow imported: {result.get('message')}")
+                else:
+                    print(f"[AUTO] Flow import failed: {result.get('message')}")
+            except Exception as e:
+                print(f"[AUTO] Error importing flow: {e}")
+    except Exception as e:
+        print(f"[AUTO] Error in auto-start: {e}")
 
 
 app = FastAPI(
@@ -344,6 +417,9 @@ async def send_message_stream(session_id: str, request: SendMessageRequest):
                 yield f"data: {json.dumps(chunk)}\n\n"
             # Save session state after streaming completes
             await manager.save_session(session_id)
+            
+            # Auto-start preview and import flow after conversation completes
+            asyncio.create_task(_auto_start_preview_and_flow(session_id))
         except asyncio.CancelledError:
             # Client disconnected - the executor should still save the message
             print(f"[STREAM] Client disconnected for session {session_id}")
@@ -644,6 +720,286 @@ async def proxy_view(session_id: str, path: str, request: Request) -> Response:
 async def proxy_view_root(session_id: str, request: Request) -> Response:
     """Proxy root path for view."""
     return await proxy_view(session_id, "", request)
+
+
+# ============================================================================
+# Preview Server Endpoints (Dev Mode with HMR)
+# ============================================================================
+
+@app.post("/sessions/{session_id}/preview/start", tags=["Preview"])
+async def start_preview(session_id: str, request: Request) -> dict:
+    """
+    Start a preview dev server for the session's web project.
+    
+    Uses Vite dev server with HMR for live reloading.
+    """
+    manager = get_session_manager()
+    session = await manager.get_session(session_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    # Determine HMR host from request headers
+    # Try CF-Connecting-IP (Cloudflare), X-Forwarded-Host, then Host header
+    host_header = (
+        request.headers.get('cf-connecting-host') or 
+        request.headers.get('x-forwarded-host') or 
+        request.headers.get('host', 'localhost')
+    )
+    hmr_host = host_header.split(':')[0]  # Remove port if present
+    
+    # If localhost detected but coming through tunnel, use the known domain
+    # Check for Cloudflare headers that indicate tunnel access
+    is_cloudflare = request.headers.get('cf-ray') is not None or request.headers.get('cf-connecting-ip') is not None
+    if is_cloudflare and hmr_host in ('localhost', '127.0.0.1'):
+        hmr_host = 'appbuilder.m3rcyzzz.club'
+    
+    # Use 443 for HTTPS/tunnel, otherwise use the request port
+    is_https = is_cloudflare or request.url.scheme == 'https' or 'appbuilder' in hmr_host or request.headers.get('x-forwarded-proto') == 'https'
+    hmr_client_port = 443 if is_https else 8000
+    
+    preview_mgr = get_preview_manager()
+    server = await preview_mgr.start_preview(
+        session_id, 
+        session.working_directory,
+        hmr_host=hmr_host,
+        hmr_client_port=hmr_client_port
+    )
+    
+    proxy_url = f"/preview/{session_id}/" if server.status == 'running' else None
+    
+    return {
+        'session_id': server.session_id,
+        'port': server.port,
+        'url': proxy_url,
+        'local_url': f'http://localhost:{server.port}' if server.status == 'running' else None,
+        'project_dir': server.project_dir,
+        'status': server.status,
+        'error': server.error
+    }
+
+
+@app.post("/sessions/{session_id}/preview/stop", tags=["Preview"])
+async def stop_preview(session_id: str) -> dict:
+    """Stop the preview dev server for a session."""
+    preview_mgr = get_preview_manager()
+    success = await preview_mgr.stop_preview(session_id)
+    
+    return {
+        'session_id': session_id,
+        'stopped': success
+    }
+
+
+@app.get("/sessions/{session_id}/preview/status", tags=["Preview"])
+async def get_preview_status(session_id: str, request: Request) -> dict:
+    """Get the status of the preview dev server for a session."""
+    preview_mgr = get_preview_manager()
+    status = await preview_mgr.get_status(session_id)
+    
+    if status is None:
+        return {
+            'session_id': session_id,
+            'status': 'not_started',
+            'url': None,
+            'local_url': None,
+            'port': None,
+            'project_dir': None,
+            'error': None
+        }
+    
+    if status.get('status') == 'running':
+        status['url'] = f"/preview/{session_id}/"
+        status['local_url'] = f"http://localhost:{status.get('port')}"
+    
+    return status
+
+
+# ============================================================================
+# Preview Proxy (Dev Mode with HMR)
+# ============================================================================
+
+@app.api_route("/preview/{session_id}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["Preview"])
+async def proxy_preview(session_id: str, path: str, request: Request) -> Response:
+    """
+    Reverse proxy for preview dev servers.
+    
+    Proxies HTTP requests to Vite dev server for live development.
+    """
+    preview_mgr = get_preview_manager()
+    status = await preview_mgr.get_status(session_id)
+    
+    if status is None or status.get('status') != 'running':
+        raise HTTPException(status_code=503, detail="Preview server not running")
+    
+    port = status.get('port')
+    if not port:
+        raise HTTPException(status_code=503, detail="Preview server port not available")
+    
+    # Vite has base set to /preview/{session_id}/, so we need to include it in the path
+    target_url = f"http://localhost:{port}/preview/{session_id}/{path}"
+    
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+    
+    body = None
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        body = await request.body()
+    
+    headers = {}
+    skip_headers = {'host', 'connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'accept-encoding'}
+    for key, value in request.headers.items():
+        if key.lower() not in skip_headers:
+            headers[key] = value
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+                follow_redirects=False,
+            )
+            
+            response_headers = {}
+            skip_response_headers = {'transfer-encoding', 'connection'}
+            for key, value in response.headers.items():
+                if key.lower() not in skip_response_headers:
+                    response_headers[key] = value
+            
+            # Don't cache dev server responses
+            response_headers['cache-control'] = 'no-store, no-cache, must-revalidate'
+            
+            content = response.content
+            content_type = response.headers.get('content-type', '')
+            
+            return Response(
+                content=content,
+                status_code=response.status_code,
+                headers=response_headers,
+                media_type=content_type or None,
+            )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Cannot connect to preview server")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Preview server timeout")
+
+
+@app.get("/preview/{session_id}", tags=["Preview"])
+async def proxy_preview_root(session_id: str, request: Request) -> Response:
+    """Proxy root path for preview."""
+    return await proxy_preview(session_id, "", request)
+
+
+@app.websocket("/preview/{session_id}/{path:path}")
+async def proxy_preview_websocket(websocket: WebSocket, session_id: str, path: str):
+    """
+    WebSocket proxy for Vite HMR (Hot Module Replacement).
+    
+    Forwards WebSocket connections to Vite dev server for live reloading.
+    """
+    preview_mgr = get_preview_manager()
+    status = await preview_mgr.get_status(session_id)
+    
+    if status is None or status.get('status') != 'running':
+        await websocket.close(code=1011, reason="Preview server not running")
+        return
+    
+    port = status.get('port')
+    if not port:
+        await websocket.close(code=1011, reason="Preview server port not available")
+        return
+    
+    # Build target WebSocket URL
+    # Vite expects the base path for WebSocket connections
+    target_url = f"ws://localhost:{port}/preview/{session_id}/{path}"
+    if websocket.query_params:
+        target_url += f"?{websocket.query_params}"
+    
+    print(f"[PREVIEW WS] Connecting to {target_url}")
+    
+    # Accept with the same subprotocol that the client requested (vite-hmr)
+    subprotocols = websocket.headers.get("sec-websocket-protocol", "").split(",")
+    subprotocols = [p.strip() for p in subprotocols if p.strip()]
+    subprotocol = subprotocols[0] if subprotocols else None
+    
+    await websocket.accept(subprotocol=subprotocol)
+    ws_backend = None
+    
+    try:
+        # Connect to Vite with the same subprotocol
+        ws_backend = await websockets.connect(
+            target_url,
+            subprotocols=[subprotocol] if subprotocol else None,
+            ping_interval=20,
+            ping_timeout=20,
+            close_timeout=10,
+        )
+        
+        print(f"[PREVIEW WS] Connected to Vite HMR for session {session_id}")
+        
+        async def forward_to_backend():
+            try:
+                while True:
+                    msg = await websocket.receive()
+                    if msg["type"] == "websocket.receive":
+                        if "text" in msg:
+                            await ws_backend.send(msg["text"])
+                        elif "bytes" in msg:
+                            await ws_backend.send(msg["bytes"])
+                    elif msg["type"] == "websocket.disconnect":
+                        break
+            except WebSocketDisconnect:
+                pass
+            except Exception as e:
+                print(f"[PREVIEW WS] Forward to backend error: {e}")
+        
+        async def forward_to_client():
+            try:
+                async for message in ws_backend:
+                    if isinstance(message, str):
+                        await websocket.send_text(message)
+                    else:
+                        await websocket.send_bytes(message)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            except Exception as e:
+                print(f"[PREVIEW WS] Forward to client error: {e}")
+        
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(forward_to_backend()),
+                asyncio.create_task(forward_to_client()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+                
+    except Exception as e:
+        print(f"[PREVIEW WS] Error: {e}")
+    finally:
+        if ws_backend:
+            try:
+                await ws_backend.close()
+            except Exception:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/preview/{session_id}")
+async def proxy_preview_websocket_root(websocket: WebSocket, session_id: str):
+    """WebSocket proxy root path for preview."""
+    await proxy_preview_websocket(websocket, session_id, "")
 
 
 # ============================================================================

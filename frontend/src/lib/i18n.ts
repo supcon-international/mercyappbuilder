@@ -114,6 +114,8 @@ export const translations = {
     unsSelectHint: '从左侧选择一个节点查看 schema',
     agentRunning: 'Agent 仍在执行中',
     refreshHistory: '刷新历史',
+    collapseSidebar: '收起侧边栏',
+    expandSidebar: '展开侧边栏',
   },
   en: {
     // Header
@@ -226,6 +228,8 @@ export const translations = {
     unsSelectHint: 'Select a node from the left to view schema',
     agentRunning: 'Agent is still running',
     refreshHistory: 'Refresh history',
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
   },
 } as const;
 

@@ -3,11 +3,9 @@ To avoid wasting time and tokens, prefer **installing and importing** proven fra
 
 Build a manufacturing web app that looks **modern and “cool”**, uses **#B2ED1D** as the primary accent, and has a **left-side module navigation rail**. The app must be **real logic** (not static UI), while remaining **pure frontend / single-process**: everything runs in the browser and persists to `localStorage`.
 
-USE IBM STYLE not DARK MODE
+Use a predominantly black-and-white palette inspired by IBM’s clean enterprise design.  Use the primary color as a accent for key highlights. Avoid colorful backgrounds and gradients; prefer neutral grays, thin borders, and restrained shadows. Dont use too many colors
 
 Plan before you start.Once you done each step update todolist right away.Your todolist should be business driven not technical detail driven so that general users can get it. 
-
-Avoid this type of issu: Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "text/html". Strict MIME type checking is enforced for module scripts per HTML spec.
 
 ## Framework & UI Baseline (Mandatory)
 BE CONCISE: You MUST answer concisely with fewer than 2 lines of text (not including tool use or code generation), unless user asks for detail. After editing code, do not write a long explanation, just keep it as short as possible without emojis.
@@ -19,6 +17,7 @@ All UI elements must be fully interactive with working onClick handlers, state c
 - Use **Vite + React + TypeScript+ IBM PLEX MONO** as the project framework, you can use cutting-edge component libs like radix and shadcn and so on.
 
 - Don't use icons that are too cartoon
+- Don't do dark mode
 
 ### TailwindCSS 4.x Configuration (CRITICAL - prevents style loss)
 - Use `@tailwindcss/vite` plugin in vite.config.ts (NOT postcss):
@@ -27,11 +26,42 @@ All UI elements must be fully interactive with working onClick handlers, state c
 
 When generating components, always use Tailwind utility classes. Ensure all primary colors use CSS variables. DO NOT create new .css files; keep all styles within the TSX files.
 
+### Vite Config Template (REQUIRED for HMR Preview)
+Use this `vite.config.ts` template to enable live preview with Hot Module Replacement:
+
+```ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  // VITE_BASE is set by preview mode, defaults to './' for production build
+  base: process.env.VITE_BASE || './',
+  plugins: [react(), tailwindcss()],
+  server: {
+    host: '0.0.0.0',
+    hmr: process.env.VITE_HMR_HOST ? {
+      protocol: process.env.VITE_HMR_PROTOCOL || 'wss',
+      host: process.env.VITE_HMR_HOST,
+      clientPort: parseInt(process.env.VITE_HMR_CLIENT_PORT || '443'),
+    } : true,
+  },
+  build: {
+    outDir: 'dist',
+  },
+})
+```
+
+This configuration enables:
+- **Preview mode**: Live reload with HMR, base path auto-set to `/preview/{session_id}/`
+- **Production mode**: Static build with `base: './'`
+- Environment variables are injected automatically by the appbuilder backend
+
 ### Dependency-First Output (Mandatory)
-- Start with **install commands** for Vite/Tailwind/shadcn and any minimal utilities.
+- Start with **install commands** for Vite/Tailwind/other UI libs and any minimal utilities.
 - Prefer **small targeted patches** over dumping full files.
 
-**Hard constraint:** all data is **mock/seeded**. **No real-time feeds, no live integrations, no external APIs, no device connections.**  
+all data is **mock/seeded**. **No real-time feeds, no live integrations, no external APIs, no device connections.**  
 
 ---
 ### clear, explicit state machines
@@ -68,13 +98,6 @@ const loadState = (): AppState => {
 **NEVER** return `JSON.parse(stored)` directly - old/corrupted data will cause `.filter()` crashes.
 
 
----
-
-## 6) Frontend Architecture Principles (Pure frontend still needs boundaries)
-- **Domain layer**: state machines, event creation, validation rules (centralized).
-- **Store layer**: single unified in-memory state access pattern.
-- **Persistence layer**: localStorage read/write, throttling,
-- **UI layer**: consumes domain outputs only; **no direct localStorage writes inside components**.
 
 ---
 
