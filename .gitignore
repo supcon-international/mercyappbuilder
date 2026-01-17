@@ -62,8 +62,12 @@ Thumbs.db
 # Session data (contains user work)
 .sessions/
 
+# Node-RED user data
+.nodered/
+
 # Logs
 *.log
+*.err
 logs/
 /tmp/
 

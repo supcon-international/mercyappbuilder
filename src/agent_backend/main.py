@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
+import websockets
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,9 +22,11 @@ from .models import (
     SendMessageRequest,
     SessionInfo,
     SessionListResponse,
+    UpdateSessionRequest,
 )
 from .session import SessionManager
 from .view import get_view_manager, ViewManager
+from .flow import get_flow_manager
 
 # Port configuration
 API_PORT = 8000
@@ -37,12 +40,16 @@ USE_STATIC_FRONTEND = FRONTEND_DIST_DIR.exists()
 # Global session manager
 session_manager: SessionManager | None = None
 
+# Global HTTP client for proxying (reuses connections)
+proxy_client: httpx.AsyncClient | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    global session_manager
+    global session_manager, proxy_client
     session_manager = SessionManager()
+    proxy_client = httpx.AsyncClient(timeout=60.0, limits=httpx.Limits(max_connections=100))
     
     # Print startup information
     print("\n" + "=" * 60)
@@ -56,6 +63,7 @@ async def lifespan(app: FastAPI):
         print(f"  Frontend:        Development mode (needs npm run dev)")
     print(f"  Preview Ports:   {PREVIEW_PORT_START}-{PREVIEW_PORT_END}")
     print(f"  View Proxy:      /view/{{session_id}}/")
+    print(f"  Flow Proxy:      /flow/")
     print("=" * 60 + "\n")
     
     # Start background cleanup task
@@ -66,6 +74,14 @@ async def lifespan(app: FastAPI):
     # Cleanup preview servers
     view_mgr = get_view_manager()
     await view_mgr.cleanup_all()
+
+    # Cleanup flow server (shared Node-RED)
+    flow_mgr = get_flow_manager()
+    await flow_mgr.stop_flow()
+    
+    # Close proxy client
+    if proxy_client:
+        await proxy_client.aclose()
     
     # Cleanup
     cleanup_task.cancel()
@@ -130,6 +146,7 @@ async def create_session(request: CreateSessionRequest) -> SessionInfo:
         system_prompt=request.system_prompt,
         allowed_tools=request.allowed_tools,
         model=request.model,
+        display_name=request.display_name,
     )
     
     return session.get_info()
@@ -159,6 +176,62 @@ async def get_session(session_id: str) -> SessionInfo:
     
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    return session.get_info()
+
+
+@app.get("/sessions/{session_id}/uns", tags=["Sessions"])
+async def get_uns(session_id: str) -> dict:
+    """Get UNS data from the session's app directory."""
+    manager = get_session_manager()
+    session = await manager.get_session(session_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    base_dir = Path(session.working_directory)
+    candidates = [
+        base_dir / "app" / "uns.json",
+        base_dir / "app" / "UNS.json",
+        base_dir / "uns.json",
+        base_dir / "UNS.json",
+    ]
+    
+    for path in candidates:
+        if path.exists() and path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to read UNS: {e}")
+    
+    # Fallback: search within the session directory (prefer shallowest match)
+    matches: list[tuple[int, Path]] = []
+    for path in base_dir.rglob("*.json"):
+        if path.is_file() and path.name.lower() == "uns.json":
+            rel_depth = len(path.relative_to(base_dir).parts)
+            matches.append((rel_depth, path))
+    if matches:
+        matches.sort(key=lambda item: item[0])
+        path = matches[0][1]
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read UNS: {e}")
+    
+    raise HTTPException(status_code=404, detail="UNS file not found in session directory")
+
+
+@app.patch("/sessions/{session_id}", response_model=SessionInfo, tags=["Sessions"])
+async def update_session(session_id: str, request: UpdateSessionRequest) -> SessionInfo:
+    """Update session metadata such as display name."""
+    manager = get_session_manager()
+    session = await manager.get_session(session_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    if request.display_name is not None:
+        await manager.update_display_name(session_id, request.display_name)
     
     return session.get_info()
 
@@ -214,8 +287,17 @@ async def send_message(session_id: str, request: SendMessageRequest) -> AgentRes
     
     executor = AgentExecutor(session)
     
+    message = request.message
+    if request.context:
+        message = (
+            "[Selected component context]\n"
+            f"{request.context}\n\n"
+            "[User request]\n"
+            f"{request.message}"
+        )
+    
     try:
-        response = await executor.execute(request.message)
+        response = await executor.execute(message)
         # Save session state after message
         await manager.save_session(session_id)
         return response
@@ -245,10 +327,19 @@ async def send_message_stream(session_id: str, request: SendMessageRequest):
     
     executor = AgentExecutor(session)
     
+    message = request.message
+    if request.context:
+        message = (
+            "[Selected component context]\n"
+            f"{request.context}\n\n"
+            "[User request]\n"
+            f"{request.message}"
+        )
+    
     async def event_generator() -> AsyncGenerator[str, None]:
         stream_gen = None
         try:
-            stream_gen = executor.execute_stream(request.message)
+            stream_gen = executor.execute_stream(message)
             async for chunk in stream_gen:
                 yield f"data: {json.dumps(chunk)}\n\n"
             # Save session state after streaming completes
@@ -256,6 +347,11 @@ async def send_message_stream(session_id: str, request: SendMessageRequest):
         except asyncio.CancelledError:
             # Client disconnected - the executor should still save the message
             print(f"[STREAM] Client disconnected for session {session_id}")
+            if stream_gen is not None:
+                try:
+                    await stream_gen.aclose()
+                except Exception:
+                    pass
             await manager.save_session(session_id)
             raise
         except Exception as e:
@@ -548,6 +644,234 @@ async def proxy_view(session_id: str, path: str, request: Request) -> Response:
 async def proxy_view_root(session_id: str, request: Request) -> Response:
     """Proxy root path for view."""
     return await proxy_view(session_id, "", request)
+
+
+# ============================================================================
+# Flow (Node-RED) Endpoints
+# ============================================================================
+
+@app.post("/flow/start", tags=["Flow"])
+async def start_flow() -> dict:
+    """Start the shared Node-RED flow server."""
+    flow_mgr = get_flow_manager()
+    server = await flow_mgr.start_flow()
+    proxy_url = "/flow/" if server.status == "running" else None
+    return {
+        "status": server.status,
+        "port": server.port,
+        "url": proxy_url,
+        "local_url": f"http://localhost:{server.port}" if server.status == "running" else None,
+        "error": server.error,
+        "managed": server.managed,
+    }
+
+
+@app.get("/flow/status", tags=["Flow"])
+async def get_flow_status() -> dict:
+    """Get the status of the shared Node-RED flow server."""
+    flow_mgr = get_flow_manager()
+    status = await flow_mgr.get_status()
+    if status is None:
+        return {
+            "status": "not_started",
+            "port": None,
+            "url": None,
+            "local_url": None,
+            "error": None,
+            "managed": False,
+        }
+    if status.get("status") == "running":
+        status["url"] = "/flow/"
+        status["local_url"] = f"http://localhost:{status.get('port')}"
+    else:
+        status["url"] = None
+        status["local_url"] = None
+    return status
+
+
+# ============================================================================
+# Flow Proxy (Node-RED)
+# ============================================================================
+
+@app.api_route("/flow/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["Flow"])
+async def proxy_flow(path: str, request: Request) -> Response:
+    """
+    Reverse proxy for the shared Node-RED instance.
+    Uses streaming for large files and connection pooling for performance.
+    """
+    global proxy_client
+    
+    flow_mgr = get_flow_manager()
+    server = await flow_mgr.start_flow()
+
+    if server.status != "running":
+        raise HTTPException(status_code=503, detail=server.error or "Flow server not running")
+
+    # Node-RED is configured with httpAdminRoot "/flow", so always prefix /flow.
+    if path:
+        target_url = f"http://localhost:{server.port}/flow/{path}"
+    else:
+        target_url = f"http://localhost:{server.port}/flow/"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    body = None
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        body = await request.body()
+
+    headers = {}
+    skip_headers = {"host", "connection", "keep-alive", "transfer-encoding", "upgrade", "accept-encoding"}
+    for key, value in request.headers.items():
+        if key.lower() not in skip_headers:
+            headers[key] = value
+
+    # Ensure we have a client
+    if proxy_client is None:
+        proxy_client = httpx.AsyncClient(timeout=60.0, limits=httpx.Limits(max_connections=100))
+
+    try:
+        # Use streaming for potentially large responses
+        async def stream_content():
+            async with proxy_client.stream(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+                follow_redirects=False,
+            ) as response:
+                # Build response headers
+                response_headers = {}
+                skip_response_headers = {"transfer-encoding", "connection", "content-encoding"}
+                for key, value in response.headers.items():
+                    if key.lower() not in skip_response_headers:
+                        response_headers[key] = value
+                
+                # Allow caching for static assets (js, css, images)
+                is_static = any(path.endswith(ext) for ext in ['.js', '.css', '.png', '.svg', '.woff', '.woff2', '.ttf', '.ico'])
+                if is_static:
+                    response_headers["cache-control"] = "public, max-age=31536000"
+                else:
+                    response_headers["cache-control"] = "no-store, no-cache, must-revalidate"
+                
+                yield response.status_code, response_headers, response.headers.get("content-type")
+                
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    yield chunk
+
+        # Get the generator
+        gen = stream_content()
+        first = await gen.__anext__()
+        status_code, response_headers, content_type = first
+        
+        async def body_gen():
+            async for chunk in gen:
+                yield chunk
+        
+        return StreamingResponse(
+            body_gen(),
+            status_code=status_code,
+            headers=response_headers,
+            media_type=content_type or None,
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Cannot connect to flow server")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Flow server timeout")
+
+
+@app.get("/flow", tags=["Flow"])
+async def proxy_flow_root(request: Request) -> Response:
+    """Proxy root path for flow."""
+    return await proxy_flow("", request)
+
+
+@app.websocket("/flow/{path:path}")
+async def proxy_flow_websocket(websocket: WebSocket, path: str):
+    """
+    WebSocket proxy for Node-RED comms endpoint.
+    Node-RED uses WebSocket for real-time editor updates.
+    """
+    flow_mgr = get_flow_manager()
+    server = await flow_mgr.start_flow()
+    
+    if server.status != "running":
+        await websocket.close(code=1011, reason="Flow server not running")
+        return
+    
+    # Build target WebSocket URL
+    target_url = f"ws://localhost:{server.port}/flow/{path}"
+    if websocket.query_params:
+        target_url += f"?{websocket.query_params}"
+    
+    await websocket.accept()
+    ws_backend = None
+    
+    try:
+        ws_backend = await websockets.connect(
+            target_url,
+            ping_interval=20,
+            ping_timeout=20,
+            close_timeout=10,
+        )
+        
+        async def forward_to_backend():
+            try:
+                while True:
+                    msg = await websocket.receive()
+                    if msg["type"] == "websocket.receive":
+                        if "text" in msg:
+                            await ws_backend.send(msg["text"])
+                        elif "bytes" in msg:
+                            await ws_backend.send(msg["bytes"])
+                    elif msg["type"] == "websocket.disconnect":
+                        break
+            except WebSocketDisconnect:
+                pass
+            except Exception:
+                pass
+        
+        async def forward_to_client():
+            try:
+                async for message in ws_backend:
+                    if isinstance(message, str):
+                        await websocket.send_text(message)
+                    else:
+                        await websocket.send_bytes(message)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            except Exception:
+                pass
+        
+        # Run both directions concurrently, wait for first to complete
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(forward_to_backend()),
+                asyncio.create_task(forward_to_client()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+                
+    except Exception:
+        pass
+    finally:
+        if ws_backend:
+            try:
+                await ws_backend.close()
+            except Exception:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # ============================================================================

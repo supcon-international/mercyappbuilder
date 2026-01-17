@@ -6,12 +6,18 @@ export interface Session {
   last_activity: string;
   message_count: number;
   model: string;
+  display_name?: string | null;
 }
 
 export interface CreateSessionRequest {
   system_prompt?: string;
   allowed_tools?: string[];
   model?: string;
+  display_name?: string | null;
+}
+
+export interface UpdateSessionRequest {
+  display_name?: string | null;
 }
 
 export interface ToolUse {
@@ -53,6 +59,7 @@ export interface StreamChunk {
 export interface SendMessageRequest {
   message: string;
   stream?: boolean;
+  context?: string | null;
 }
 
 export interface AgentResponse {
@@ -73,4 +80,18 @@ export interface HistoryResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface UnsTopic {
+  id: string;
+  path: string;
+  type: 'metric' | 'state' | 'action' | 'info' | string;
+  label?: string;
+  payloadSchema?: Record<string, unknown>;
+}
+
+export interface UnsData {
+  version?: string;
+  site?: string;
+  topics: UnsTopic[];
 }

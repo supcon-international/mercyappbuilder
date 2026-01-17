@@ -10,7 +10,9 @@ import type { Session } from '@/types';
 
 function App() {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [selectedComponentContext, setSelectedComponentContext] = useState<string | null>(null);
   const [showView, setShowView] = useState(false);
+  const [viewPanelTab, setViewPanelTab] = useState<'view' | 'uns' | 'flow'>('view');
   const [showSidebar, setShowSidebar] = useState(false);
   const { t, locale, toggleLocale } = useI18n();
   
@@ -31,6 +33,7 @@ function App() {
         // Do NOT auto-show for not_started - wait for user to manually start
         if (status.status === 'running') {
           setShowView(true);
+          setViewPanelTab('view');
           setViewAutoShown(selectedSession.session_id);
         }
       } catch {
@@ -44,6 +47,10 @@ function App() {
     
     return () => clearInterval(interval);
   }, [selectedSession?.session_id, showView, viewAutoShown]);
+
+  useEffect(() => {
+    setSelectedComponentContext(null);
+  }, [selectedSession?.session_id]);
   
   // Resizable panel state
   const [chatWidth, setChatWidth] = useState(50); // percentage
@@ -123,15 +130,40 @@ function App() {
             {locale === 'zh' ? 'EN' : '中'}
           </Button>
           {selectedSession && (
-            <Button
-              variant={showView ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowView(!showView)}
-              className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
-            >
-              <span className="hidden sm:inline">{showView ? t('hideView') : t('showView')}</span>
-              <span className="sm:hidden">{showView ? '✕' : '👁'}</span>
-            </Button>
+            <>
+              <Button
+                variant={showView && viewPanelTab === 'view' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  if (showView && viewPanelTab === 'view') {
+                    setShowView(false);
+                    return;
+                  }
+                  setViewPanelTab('view');
+                  setShowView(true);
+                }}
+                className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
+              >
+                <span className="hidden sm:inline">{showView && viewPanelTab === 'view' ? t('hideView') : t('showView')}</span>
+                <span className="sm:hidden">{showView && viewPanelTab === 'view' ? '✕' : '👁'}</span>
+              </Button>
+              <Button
+                variant={showView && viewPanelTab === 'flow' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  if (showView && viewPanelTab === 'flow') {
+                    setShowView(false);
+                    return;
+                  }
+                  setViewPanelTab('flow');
+                  setShowView(true);
+                }}
+                className="rounded-lg h-7 sm:h-8 px-2 sm:px-3 text-xs font-medium btn-glow"
+              >
+                <span className="hidden sm:inline">{showView && viewPanelTab === 'flow' ? t('hideFlow') : t('showFlow')}</span>
+                <span className="sm:hidden">{showView && viewPanelTab === 'flow' ? '✕' : '🧩'}</span>
+              </Button>
+            </>
           )}
         </div>
       </header>
@@ -179,7 +211,11 @@ function App() {
           style={showView ? { width: `${chatWidth}%` } : undefined}
         >
           <ErrorBoundary>
-            <ChatPanel session={selectedSession} />
+            <ChatPanel
+              session={selectedSession}
+              selectedComponentContext={selectedComponentContext}
+              onClearComponentContext={() => setSelectedComponentContext(null)}
+            />
           </ErrorBoundary>
         </section>
 
@@ -202,7 +238,9 @@ function App() {
             <ErrorBoundary>
               <ViewPanel
                 sessionId={selectedSession?.session_id || null}
+                onSelectComponentContext={setSelectedComponentContext}
                 onClose={() => setShowView(false)}
+                initialTab={viewPanelTab}
               />
             </ErrorBoundary>
           </section>
@@ -214,7 +252,9 @@ function App() {
             <ErrorBoundary>
               <ViewPanel
                 sessionId={selectedSession?.session_id || null}
+                onSelectComponentContext={setSelectedComponentContext}
                 onClose={() => setShowView(false)}
+                initialTab={viewPanelTab}
               />
             </ErrorBoundary>
           </section>

@@ -55,7 +55,8 @@ class SessionDatabase:
                     status TEXT NOT NULL DEFAULT 'active',
                     created_at TEXT NOT NULL,
                     last_activity TEXT NOT NULL,
-                    sdk_session_id TEXT
+                    sdk_session_id TEXT,
+                    display_name TEXT
                 )
             """)
             
@@ -77,6 +78,11 @@ class SessionDatabase:
                 CREATE INDEX IF NOT EXISTS idx_messages_session 
                 ON messages(session_id)
             """)
+
+            # Backward-compatible migration for older databases
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+            if "display_name" not in columns:
+                conn.execute("ALTER TABLE sessions ADD COLUMN display_name TEXT")
     
     def save_session(self, session_data: dict[str, Any]) -> None:
         """Save or update a session."""
@@ -85,8 +91,8 @@ class SessionDatabase:
             conn.execute("""
                 INSERT OR REPLACE INTO sessions 
                 (session_id, working_directory, system_prompt, allowed_tools, 
-                 model, status, created_at, last_activity, sdk_session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 model, status, created_at, last_activity, sdk_session_id, display_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session_data["session_id"],
                 session_data["working_directory"],
@@ -97,6 +103,7 @@ class SessionDatabase:
                 session_data["created_at"],
                 session_data["last_activity"],
                 session_data.get("sdk_session_id"),
+                session_data.get("display_name"),
             ))
             
             # Delete existing messages and re-insert
@@ -195,6 +202,14 @@ class SessionDatabase:
             conn.execute(
                 "UPDATE sessions SET sdk_session_id = ? WHERE session_id = ?",
                 (sdk_session_id, session_id)
+            )
+
+    def update_display_name(self, session_id: str, display_name: str | None) -> None:
+        """Update the display name for a session."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET display_name = ? WHERE session_id = ?",
+                (display_name, session_id)
             )
     
     def add_message(self, session_id: str, role: str, content: str, 

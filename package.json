@@ -1,0 +1,12 @@
+{
+  "name": "mercyappbuilder",
+  "version": "1.0.0",
+  "description": "Tier0 Appbuilder - Node-RED integration",
+  "private": true,
+  "scripts": {
+    "nodered": "node-red -u .nodered -p 1880"
+  },
+  "dependencies": {
+    "node-red": "^4.0.0"
+  }
+}

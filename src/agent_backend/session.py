@@ -3,14 +3,20 @@
 import asyncio
 import json
 import os
+import secrets
 import shutil
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+
+def generate_session_id() -> str:
+    """Generate a 16-character hex session ID (8 bytes = 64 bits)."""
+    return secrets.token_hex(8)
+
 from .models import ChatMessage, SessionInfo, SessionStatus
 from .database import SessionDatabase
+from .flow import get_flow_manager
 
 
 class Session:
@@ -23,6 +29,7 @@ class Session:
         system_prompt: str | None = None,
         allowed_tools: list[str] | None = None,
         model: str = "claude-sonnet-4-20250514",
+        display_name: str | None = None,
         created_at: datetime | None = None,
         last_activity: datetime | None = None,
         sdk_session_id: str | None = None,
@@ -33,6 +40,7 @@ class Session:
         self.system_prompt = system_prompt
         self.allowed_tools = allowed_tools
         self.model = model
+        self.display_name = display_name
         self.status = SessionStatus.ACTIVE
         self.created_at = created_at or datetime.now()
         self.last_activity = last_activity or datetime.now()
@@ -95,7 +103,8 @@ class Session:
             created_at=self.created_at,
             last_activity=self.last_activity,
             message_count=len(self.messages),
-            model=self.model
+            model=self.model,
+            display_name=self.display_name,
         )
     
     def close(self) -> None:
@@ -111,6 +120,7 @@ class Session:
             "system_prompt": self.system_prompt,
             "allowed_tools": self.allowed_tools,
             "model": self.model,
+            "display_name": self.display_name,
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "last_activity": self.last_activity.isoformat(),
@@ -136,6 +146,7 @@ class Session:
             system_prompt=data.get("system_prompt"),
             allowed_tools=data.get("allowed_tools"),
             model=data.get("model", "claude-sonnet-4-20250514"),
+            display_name=data.get("display_name"),
             created_at=datetime.fromisoformat(data["created_at"]),
             last_activity=datetime.fromisoformat(data["last_activity"]),
             sdk_session_id=data.get("sdk_session_id"),
@@ -267,6 +278,7 @@ class SessionManager:
                         working_directory=item_path,
                         system_prompt="基于 claude.md 完成应用构建",
                         model="claude-sonnet-4-20250514",
+                        display_name=None,
                         created_at=datetime.fromtimestamp(os.path.getctime(item_path)),
                         last_activity=datetime.fromtimestamp(os.path.getmtime(item_path)),
                         db=self._db,
@@ -307,9 +319,10 @@ class SessionManager:
         system_prompt: str | None = None,
         allowed_tools: list[str] | None = None,
         model: str = "claude-sonnet-4-20250514",
+        display_name: str | None = None,
     ) -> Session:
         """Create a new session with an automatically generated working directory."""
-        session_id = str(uuid.uuid4())
+        session_id = generate_session_id()
         
         # Auto-generate working directory based on session_id
         working_directory = os.path.join(self.base_workspace_dir, session_id)
@@ -321,6 +334,7 @@ class SessionManager:
             system_prompt=system_prompt,
             allowed_tools=allowed_tools,
             model=model,
+            display_name=display_name,
             db=self._db,
         )
         
@@ -356,7 +370,7 @@ class SessionManager:
             return False
     
     async def delete_session(self, session_id: str, delete_directory: bool = True) -> bool:
-        """Delete a session completely, including its working directory."""
+        """Delete a session completely, including its working directory and Node-RED flow."""
         async with self._lock:
             if session_id in self._sessions:
                 session = self._sessions[session_id]
@@ -367,6 +381,18 @@ class SessionManager:
                 
                 del self._sessions[session_id]
                 self._db.delete_session(session_id)
+                
+                # Delete corresponding Node-RED flow (async, don't block on failure)
+                try:
+                    flow_mgr = get_flow_manager()
+                    result = await flow_mgr.delete_flow(session_id)
+                    if result.get("success"):
+                        print(f"[SESSION] Deleted Node-RED flow for {session_id}")
+                    else:
+                        print(f"[SESSION] Flow delete note: {result.get('message')}")
+                except Exception as e:
+                    print(f"[SESSION] Failed to delete Node-RED flow: {e}")
+                
                 return True
             return False
     
@@ -387,19 +413,33 @@ class SessionManager:
                 self._db.update_sdk_session_id(session_id, sdk_session_id)
                 return True
             return False
+
+    async def update_display_name(self, session_id: str, display_name: str | None) -> bool:
+        """Update session display name."""
+        normalized = display_name.strip() if display_name else None
+        if normalized == "":
+            normalized = None
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.display_name = normalized
+                self._db.update_display_name(session_id, normalized)
+                return True
+            return False
     
     async def cleanup_inactive_sessions(self, max_idle_minutes: int = 60) -> int:
-        """Clean up sessions that have been inactive for too long."""
+        """Mark sessions as idle when they have been inactive for too long."""
         now = datetime.now()
-        closed_count = 0
+        idle_count = 0
         
         async with self._lock:
             for session in self._sessions.values():
                 if session.status != SessionStatus.CLOSED:
                     idle_time = (now - session.last_activity).total_seconds() / 60
                     if idle_time > max_idle_minutes:
-                        session.close()
+                        # Mark idle rather than closed to keep sessions visible/usable.
+                        session.status = SessionStatus.IDLE
                         self._save_session(session)
-                        closed_count += 1
+                        idle_count += 1
         
-        return closed_count
+        return idle_count

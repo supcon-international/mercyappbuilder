@@ -38,13 +38,17 @@ interface SessionListProps {
 }
 
 export function SessionList({ selectedSession, onSelectSession }: SessionListProps) {
-  const { sessions, loading, error, fetchSessions, createSession, deleteSession } = useSessions();
+  const { sessions, loading, error, fetchSessions, createSession, deleteSession, updateSessionName } = useSessions();
   const { t, locale } = useI18n();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renamingSession, setRenamingSession] = useState<Session | null>(null);
   const defaultSystemPrompt = locale === 'zh' 
     ? '基于 claude.md 完成应用构建' 
     : 'Build applications based on claude.md';
   const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompt);
+  const [createDisplayName, setCreateDisplayName] = useState('');
+  const [renameDisplayName, setRenameDisplayName] = useState('');
   // Default to Opus 4.5 with thinking enabled
   const [model, setModel] = useState('claude-opus-4-5-20251101');
 
@@ -57,10 +61,12 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
       const session = await createSession({
         system_prompt: systemPrompt || defaultSystemPrompt,
         model,
+        display_name: createDisplayName || null,
       });
       onSelectSession(session);
       setCreateDialogOpen(false);
       setSystemPrompt(defaultSystemPrompt);
+      setCreateDisplayName('');
     } catch {
       // Error handled by hook
     }
@@ -73,6 +79,25 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
       if (selectedSession?.session_id === sessionId) {
         onSelectSession(sessions.find(s => s.session_id !== sessionId) || null as unknown as Session);
       }
+    }
+  };
+
+  const handleOpenRename = (session: Session, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingSession(session);
+    setRenameDisplayName(session.display_name || '');
+    setRenameDialogOpen(true);
+  };
+
+  const handleRenameSession = async () => {
+    if (!renamingSession) return;
+    try {
+      await updateSessionName(renamingSession.session_id, renameDisplayName || null);
+      setRenameDialogOpen(false);
+      setRenamingSession(null);
+      setRenameDisplayName('');
+    } catch {
+      // Error handled by hook
     }
   };
 
@@ -105,7 +130,15 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
       <div className="p-3 sm:p-4 pb-2 sm:pb-3">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{t('sessions')}</h2>
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <Dialog
+            open={createDialogOpen}
+            onOpenChange={(open) => {
+              setCreateDialogOpen(open);
+              if (!open) {
+                setCreateDisplayName('');
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button size="sm" className="rounded-lg h-7 px-2 sm:px-2.5 text-xs font-medium btn-glow">{t('newSession')}</Button>
             </DialogTrigger>
@@ -117,6 +150,18 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <label htmlFor="display-name" className="text-sm font-medium">
+                    {t('sessionName')}
+                  </label>
+                  <Textarea
+                    id="display-name"
+                    value={createDisplayName}
+                    onChange={(e) => setCreateDisplayName(e.target.value)}
+                    placeholder={t('sessionNamePlaceholder')}
+                    rows={1}
+                  />
+                </div>
                 <div className="grid gap-2">
                   <label htmlFor="model" className="text-sm font-medium">
                     {t('model')}
@@ -164,6 +209,47 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          <Dialog
+            open={renameDialogOpen}
+            onOpenChange={(open) => {
+              setRenameDialogOpen(open);
+              if (!open) {
+                setRenamingSession(null);
+                setRenameDisplayName('');
+              }
+            }}
+          >
+            <DialogContent className="w-[95vw] max-w-md mx-auto">
+              <DialogHeader>
+                <DialogTitle>{t('renameSession')}</DialogTitle>
+                <DialogDescription>
+                  {t('sessionNamePlaceholder')}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <label htmlFor="rename-display-name" className="text-sm font-medium">
+                    {t('sessionName')}
+                  </label>
+                  <Textarea
+                    id="rename-display-name"
+                    value={renameDisplayName}
+                    onChange={(e) => setRenameDisplayName(e.target.value)}
+                    placeholder={t('sessionNamePlaceholder')}
+                    rows={1}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setRenameDialogOpen(false)} className="btn-glow h-8">
+                  {t('cancel')}
+                </Button>
+                <Button size="sm" onClick={handleRenameSession} disabled={loading} className="btn-glow h-8">
+                  {t('save')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
@@ -182,6 +268,10 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
               </div>
             ) : (
               sessions.map((session) => (
+                (() => {
+                  const name = (session.display_name || '').trim();
+                  const title = name || session.session_id.slice(0, 8);
+                  return (
                 <div
                   key={session.session_id}
                   className={`p-3 rounded-xl cursor-pointer transition-all duration-300 group glow-border ${
@@ -194,18 +284,33 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${getStatusColor(session.status)} ${session.status === 'active' ? 'animate-pulse' : ''}`} />
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {session.session_id.slice(0, 8)}
+                      <span className="text-xs font-medium text-foreground">
+                        {title}
                       </span>
+                      {name && (
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {session.session_id.slice(0, 8)}
+                        </span>
+                      )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => handleDeleteSession(session.session_id, e)}
-                    >
-                      ×
-                    </Button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+                        onClick={(e) => handleOpenRename(session, e)}
+                      >
+                        {t('editName')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={(e) => handleDeleteSession(session.session_id, e)}
+                      >
+                        ×
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs text-muted-foreground">
@@ -222,6 +327,8 @@ export function SessionList({ selectedSession, onSelectSession }: SessionListPro
                     </span>
                   </div>
                 </div>
+                  );
+                })()
               ))
             )}
           </div>

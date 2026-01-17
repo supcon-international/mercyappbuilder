@@ -19,6 +19,8 @@ import type { PermissionRequest } from '@/lib/api';
 
 interface ChatPanelProps {
   session: Session | null;
+  selectedComponentContext?: string | null;
+  onClearComponentContext?: () => void;
 }
 
 // Extended tool type with live streaming info
@@ -557,7 +559,7 @@ function MessageBubble({ message, t, locale }: { message: ChatMessage; t: (key: 
   );
 }
 
-export function ChatPanel({ session }: ChatPanelProps) {
+export function ChatPanel({ session, selectedComponentContext, onClearComponentContext }: ChatPanelProps) {
   const {
     messages,
     loading,
@@ -565,6 +567,7 @@ export function ChatPanel({ session }: ChatPanelProps) {
     error,
     permissionRequests,
     sendMessageStream,
+    fetchHistory,
     stopStreaming,
     respondToPermission,
   } = useChat(session?.session_id || null);
@@ -589,7 +592,10 @@ export function ChatPanel({ session }: ChatPanelProps) {
 
     const message = input.trim();
     setInput('');
-    await sendMessageStream(message);
+    await sendMessageStream(message, selectedComponentContext);
+    if (onClearComponentContext) {
+      onClearComponentContext();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -640,6 +646,20 @@ export function ChatPanel({ session }: ChatPanelProps) {
       <CardContent className="flex-1 p-0 flex flex-col min-h-0 overflow-hidden">
         <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
           <div className="p-2 sm:p-4">
+            {session.status === 'busy' && !streaming && (
+              <div className="mb-3 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs flex items-center justify-between gap-2">
+                <span>{t('agentRunning')}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={fetchHistory}
+                  className="h-6 px-2 text-xs text-primary/80 hover:text-primary"
+                >
+                  {t('refreshHistory')}
+                </Button>
+              </div>
+            )}
             {messages.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                 <div className="text-center">
@@ -675,6 +695,26 @@ export function ChatPanel({ session }: ChatPanelProps) {
         )}
         
         <div className="p-2 sm:p-3 border-t border-border/30 flex-shrink-0 bg-card/50 backdrop-blur-sm">
+          {selectedComponentContext && (
+            <div className="mb-2 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs flex items-center justify-between gap-2">
+              <span className="truncate">
+                {t('selectedComponent')}: {
+                  selectedComponentContext.split('\n')[0].replace(/^component:\s*/i, '')
+                }
+              </span>
+              {onClearComponentContext && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClearComponentContext}
+                  className="h-6 px-2 text-xs text-primary/80 hover:text-primary"
+                >
+                  {t('clear')}
+                </Button>
+              )}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="flex gap-1.5 sm:gap-2">
             <Textarea
               value={input}

@@ -1,11 +1,13 @@
 import type {
   Session,
   CreateSessionRequest,
+  UpdateSessionRequest,
   SendMessageRequest,
   AgentResponse,
   SessionListResponse,
   HistoryResponse,
   StreamChunk,
+  UnsData,
 } from '@/types';
 
 const API_BASE = '/api';
@@ -108,6 +110,10 @@ export const api = {
     return fetchApi<Session>(`/sessions/${sessionId}`);
   },
 
+  async getUns(sessionId: string): Promise<UnsData> {
+    return fetchApi<UnsData>(`/sessions/${sessionId}/uns`);
+  },
+
   async deleteSession(
     sessionId: string,
     deleteDir = true,
@@ -115,6 +121,16 @@ export const api = {
   ): Promise<void> {
     await fetchApi(`/sessions/${sessionId}?delete=${deleteDir}&keep_directory=${keepDirectory}`, {
       method: 'DELETE',
+    });
+  },
+
+  async updateSession(
+    sessionId: string,
+    request: UpdateSessionRequest
+  ): Promise<Session> {
+    return fetchApi<Session>(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(request),
     });
   },
 
@@ -133,6 +149,7 @@ export const api = {
   async *streamMessage(
     sessionId: string,
     message: string,
+    context?: string | null,
     signal?: AbortSignal
   ): AsyncGenerator<StreamChunk> {
     
@@ -141,7 +158,7 @@ export const api = {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ message, stream: true }),
+      body: JSON.stringify({ message, stream: true, context: context || undefined }),
       signal,
     });
     
@@ -242,6 +259,17 @@ export const api = {
   async getViewStatus(sessionId: string): Promise<ViewStatus> {
     return fetchApi<ViewStatus>(`/sessions/${sessionId}/view/status`);
   },
+
+  // Flow (shared Node-RED)
+  async startFlow(): Promise<FlowStatus> {
+    return fetchApi<FlowStatus>(`/flow/start`, {
+      method: 'POST',
+    });
+  },
+
+  async getFlowStatus(): Promise<FlowStatus> {
+    return fetchApi<FlowStatus>(`/flow/status`);
+  },
 };
 
 export interface ViewStatus {
@@ -252,6 +280,15 @@ export interface ViewStatus {
   port: number | null;
   project_dir: string | null;
   error: string | null;
+}
+
+export interface FlowStatus {
+  status: 'not_started' | 'starting' | 'running' | 'stopped' | 'error';
+  url: string | null;
+  local_url: string | null;
+  port: number | null;
+  error: string | null;
+  managed: boolean;
 }
 
 export interface PermissionRequest {

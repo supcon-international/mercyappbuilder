@@ -52,6 +52,21 @@ export function useSessions() {
     }
   }, []);
 
+  const updateSessionName = useCallback(async (sessionId: string, displayName: string | null) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await api.updateSession(sessionId, { display_name: displayName });
+      setSessions((prev) => prev.map((s) => (s.session_id === sessionId ? updated : s)));
+      return updated;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update session');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   return {
     sessions,
     loading,
@@ -59,6 +74,7 @@ export function useSessions() {
     fetchSessions,
     createSession,
     deleteSession,
+    updateSessionName,
   };
 }
 
@@ -166,7 +182,7 @@ export function useChat(sessionId: string | null) {
   }, [sessionId, syncToCache]);
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, context?: string | null) => {
       if (!sessionId) return;
       setLoading(true);
       setError(null);
@@ -181,7 +197,7 @@ export function useChat(sessionId: string | null) {
       syncToCache(newMessages);
 
       try {
-        const response = await api.sendMessage(sessionId, { message: content });
+        const response = await api.sendMessage(sessionId, { message: content, context: context || undefined });
         const assistantMessage: ChatMessage = {
           role: 'assistant',
           content: response.message,
@@ -200,7 +216,7 @@ export function useChat(sessionId: string | null) {
   );
 
   const sendMessageStream = useCallback(
-    async (content: string) => {
+    async (content: string, context?: string | null) => {
       if (!sessionId) return;
       
       // Abort any existing stream for this session
@@ -240,7 +256,7 @@ export function useChat(sessionId: string | null) {
 
       try {
         
-        for await (const chunk of api.streamMessage(sessionId, content, abortController.signal)) {
+        for await (const chunk of api.streamMessage(sessionId, content, context, abortController.signal)) {
           const chunkType: string = chunk.type;
           
           // Get current messages from cache (in case user switched and came back)

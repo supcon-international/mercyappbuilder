@@ -8,6 +8,8 @@
 - **流式响应**: SSE 实时输出，思考过程可视化，工具调用状态展示
 - **多 Session**: 独立工作目录，隔离的对话历史
 - **实时预览**: 构建并预览 Session 内的 Web 项目
+- **Flow 编排**: 共享 Node-RED 实例，自动导入 Session 的 flow.json
+- **UNS 视图**: Appbuilder View 内展示 UNS.json 的树形结构与 Schema
 - **SQLite 持久化**: 会话和消息持久化，重启不丢失
 - **国际化**: 中英文切换
 - **错误恢复**: API 重试、错误边界、断线恢复
@@ -19,6 +21,7 @@
 ```bash
 # 安装依赖
 uv sync
+npm install                                      # Node-RED 本地安装
 cd frontend && npm install && npm run build && cd ..
 
 # 启动服务（需要非 root 用户以启用 bypassPermissions）
@@ -45,6 +48,7 @@ cd frontend && npm run dev
 |------|------|------|
 | API + 前端 | 8000 | FastAPI，同时服务静态前端和 API |
 | View | 4001-4100 | 动态分配，Session 内 Web 项目预览 |
+| Flow | 1880 | 共享 Node-RED 实例（通过 `/flow/*` 代理） |
 
 ## 公网访问（Tunnel）
 
@@ -52,6 +56,7 @@ cd frontend && npm run dev
 - 直接服务前端静态文件
 - 处理 `/api/*` 请求
 - 代理 `/view/{session_id}/*` 到对应 View 服务器
+- 代理 `/flow/*` 到共享 Node-RED 实例
 
 ## API
 
@@ -66,6 +71,10 @@ cd frontend && npm run dev
 | POST | `/sessions/{id}/view/stop` | 停止 View |
 | GET | `/sessions/{id}/view/status` | View 状态 |
 | GET | `/view/{id}/*` | View 代理 |
+| GET | `/sessions/{id}/uns` | 获取 UNS.json |
+| POST | `/flow/start` | 启动共享 Node-RED |
+| GET | `/flow/status` | Flow 状态 |
+| GET | `/flow/*` | Flow 代理 |
 
 ## 项目结构
 
@@ -75,6 +84,7 @@ cd frontend && npm run dev
 │   ├── session.py        # Session 管理 + SQLite
 │   ├── agent.py          # Claude Agent 执行器
 │   ├── view.py           # View 服务器管理
+│   ├── flow.py           # Node-RED Flow 管理
 │   └── permissions.py    # 权限管理
 ├── frontend/             # 前端 (React + Vite + Shadcn)
 │   ├── src/
@@ -82,7 +92,10 @@ cd frontend && npm run dev
 │   │   ├── hooks/        # 自定义 Hooks
 │   │   └── lib/          # 工具函数
 │   └── dist/             # 构建产物
+├── node_modules/         # Node-RED 本地安装
+├── .nodered/             # Node-RED 数据目录 (flows, settings)
 ├── .sessions/            # Session 工作目录 (自动创建)
+├── package.json          # Node-RED 依赖
 └── claude.md             # Agent 构建指南
 ```
 

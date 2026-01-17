@@ -10,6 +10,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from .flow import get_flow_manager
+
 
 @dataclass
 class ViewServer:
@@ -269,6 +271,38 @@ class ViewManager:
             # Build and serve
             return await self._build_and_serve(session_id, project_dir, port, candidates)
     
+    async def _import_session_flow(self, session_id: str, project_dir: str) -> None:
+        """Import flow.json from dist directory to Node-RED if it exists."""
+        # Check common dist locations for flow.json
+        flow_paths = [
+            os.path.join(project_dir, "dist", "flow.json"),
+            os.path.join(project_dir, "build", "flow.json"),
+            os.path.join(project_dir, "flow.json"),
+        ]
+        
+        flow_json_path = None
+        for path in flow_paths:
+            if os.path.exists(path):
+                flow_json_path = path
+                break
+        
+        if not flow_json_path:
+            print(f"[VIEW] No flow.json found for {session_id}")
+            return
+        
+        print(f"[VIEW] Found flow.json at {flow_json_path}, importing to Node-RED...")
+        
+        try:
+            flow_mgr = get_flow_manager()
+            result = await flow_mgr.import_flow_from_file(session_id, flow_json_path)
+            
+            if result.get("success"):
+                print(f"[VIEW] Flow imported successfully: {result.get('message')}")
+            else:
+                print(f"[VIEW] Flow import failed: {result.get('message')}")
+        except Exception as e:
+            print(f"[VIEW] Error importing flow: {e}")
+
     async def _build_and_serve(self, session_id: str, project_dir: str, port: int, candidates: List[str]) -> ViewServer:
         """Build project and start a static server."""
         server = ViewServer(
@@ -314,6 +348,8 @@ class ViewManager:
                         
                         if build_process.returncode == 0:
                             print(f"[VIEW] Build succeeded for {session_id}")
+                            # Try to import flow.json if it exists in dist
+                            await self._import_session_flow(session_id, project_dir)
                             break
                         else:
                             last_error = stderr.decode()[:500]

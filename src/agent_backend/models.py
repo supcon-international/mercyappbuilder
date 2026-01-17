@@ -35,6 +35,10 @@ class CreateSessionRequest(BaseModel):
         default="claude-sonnet-4-20250514",
         description="The Claude model to use"
     )
+    display_name: str | None = Field(
+        default=None,
+        description="Optional display name for the session"
+    )
 
 
 class SessionInfo(BaseModel):
@@ -47,6 +51,7 @@ class SessionInfo(BaseModel):
     last_activity: datetime = Field(..., description="Last activity timestamp")
     message_count: int = Field(default=0, description="Number of messages in session")
     model: str = Field(..., description="Claude model being used")
+    display_name: str | None = Field(default=None, description="Display name for the session")
 
 
 class ChatMessage(BaseModel):
@@ -72,6 +77,19 @@ class SendMessageRequest(BaseModel):
     stream: bool = Field(
         default=False,
         description="Whether to stream the response"
+    )
+    context: str | None = Field(
+        default=None,
+        description="Optional context to prepend to the message"
+    )
+
+
+class UpdateSessionRequest(BaseModel):
+    """Request model for updating a session."""
+    
+    display_name: str | None = Field(
+        default=None,
+        description="Updated display name for the session"
     )
 
 

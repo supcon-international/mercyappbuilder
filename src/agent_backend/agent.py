@@ -453,6 +453,13 @@ class AgentExecutor:
                 
             except Exception as e:
                 query_error = e
+                # Print detailed error info including stderr
+                stderr_info = getattr(e, "stderr", None) or "No stderr available"
+                exit_code_info = getattr(e, "exit_code", None)
+                print(f"[ERROR] Exception type: {type(e).__name__}")
+                print(f"[ERROR] Exception message: {e}")
+                print(f"[ERROR] Exit code: {exit_code_info}")
+                print(f"[ERROR] Stderr output: {stderr_info}")
                 print(f"[SAVE] Error occurred, saving partial response: {e}")
                 # Stop heartbeat
                 query_running = False
