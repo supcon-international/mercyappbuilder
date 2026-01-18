@@ -1097,8 +1097,8 @@ export function ChatPanel({
   }
 
   return (
-    <Card className="h-full flex flex-col gap-0 py-0 overflow-hidden border-border/50 shadow-sm card-hover">
-      <CardHeader className="sticky top-0 z-30 py-2 sm:py-2.5 px-3 sm:px-4 flex-shrink-0 border-b border-border/30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+    <Card className="w-full h-full flex flex-col gap-0 py-0 overflow-hidden border-border/50 shadow-sm card-hover">
+      <CardHeader className="sticky top-0 z-30 py-2 sm:py-2.5 px-3 sm:px-4 flex-shrink-0 border-b border-border/30 bg-background/95 backdrop-blur-0 sm:backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
             <CardTitle className="text-sm font-bold">{t('conversation')}</CardTitle>
@@ -1213,7 +1213,7 @@ export function ChatPanel({
           </div>
         )}
         
-        <div className="p-2 sm:p-3 border-t border-border/30 flex-shrink-0 bg-card/50 backdrop-blur-sm">
+        <div className="p-2 sm:p-3 border-t border-border/30 flex-shrink-0 bg-card/50 backdrop-blur-0 sm:backdrop-blur-sm">
           {selectedComponentContext && (
             <div className="mb-2 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs flex items-center justify-between gap-2">
               <span className="truncate">

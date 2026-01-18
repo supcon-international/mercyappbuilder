@@ -107,7 +107,7 @@ function App() {
       <div className="glow-orb glow-orb-3 hidden sm:block" aria-hidden="true" />
 
       {/* Main Content - Responsive */}
-      <main ref={containerRef} className="relative z-10 flex-1 flex min-h-0 bg-muted/20 backdrop-blur-sm">
+      <main ref={containerRef} className="relative z-10 flex-1 flex min-h-0 bg-muted/20 backdrop-blur-0 sm:backdrop-blur-sm">
         {/* Mobile sidebar toggle */}
         {!showSidebar && (
           <Button
@@ -200,7 +200,7 @@ function App() {
         {/* Chat Panel - Responsive & Resizable */}
         <section 
           className={`
-            p-2 sm:p-4 min-w-0
+            p-0 sm:p-4 min-w-0
             ${showView ? 'hidden md:block' : 'flex-1'}
           `}
           style={showView ? { width: `${chatWidth}%` } : undefined}
@@ -238,7 +238,7 @@ function App() {
         {/* View Panel - Responsive & Resizable */}
         {showView && (
           <section 
-            className="p-2 sm:p-4 min-w-0 hidden md:block"
+            className="p-0 sm:p-4 min-w-0 hidden md:block"
             style={{ width: `${100 - chatWidth}%` }}
           >
             <ErrorBoundary>
@@ -254,7 +254,7 @@ function App() {
         
         {/* Mobile View (full width) */}
         {showView && (
-          <section className="w-full p-2 sm:p-4 md:hidden">
+          <section className="w-full p-0 sm:p-4 md:hidden">
             <ErrorBoundary>
               <ViewPanel
                 sessionId={selectedSession?.session_id || null}

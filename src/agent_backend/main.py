@@ -143,33 +143,38 @@ async def _auto_start_preview_and_flow(session_id: str):
             except Exception as e:
                 print(f"[AUTO] Failed to start preview: {e}")
         
-        # Auto-import flow.json if it exists
-        flow_paths = [
-            os.path.join(session_dir, "dist", "flow.json"),
-            os.path.join(session_dir, "build", "flow.json"),
-            os.path.join(session_dir, "flow.json"),
-            os.path.join(session_dir, "public", "flow.json"),
-        ]
-        
-        flow_json_path = None
-        for path in flow_paths:
-            if os.path.exists(path):
-                flow_json_path = path
-                break
-        
-        if flow_json_path:
-            print(f"[AUTO] Found flow.json at {flow_json_path}, importing to Node-RED...")
-            try:
-                flow_mgr = get_flow_manager()
-                result = await flow_mgr.import_flow_from_file(session_id, flow_json_path)
-                if result.get("success"):
-                    print(f"[AUTO] Flow imported: {result.get('message')}")
-                else:
-                    print(f"[AUTO] Flow import failed: {result.get('message')}")
-            except Exception as e:
-                print(f"[AUTO] Error importing flow: {e}")
+        await _import_flow_json(session_id, session_dir, context="AUTO")
     except Exception as e:
         print(f"[AUTO] Error in auto-start: {e}")
+
+
+def _find_flow_json(session_dir: str) -> str | None:
+    flow_paths = [
+        os.path.join(session_dir, "dist", "flow.json"),
+        os.path.join(session_dir, "build", "flow.json"),
+        os.path.join(session_dir, "flow.json"),
+        os.path.join(session_dir, "public", "flow.json"),
+    ]
+    for path in flow_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+async def _import_flow_json(session_id: str, session_dir: str, context: str) -> None:
+    flow_json_path = _find_flow_json(session_dir)
+    if not flow_json_path:
+        return
+    print(f"[{context}] Found flow.json at {flow_json_path}, importing to Node-RED...")
+    try:
+        flow_mgr = get_flow_manager()
+        result = await flow_mgr.import_flow_from_file(session_id, flow_json_path)
+        if result.get("success"):
+            print(f"[{context}] Flow imported: {result.get('message')}")
+        else:
+            print(f"[{context}] Flow import failed: {result.get('message')}")
+    except Exception as e:
+        print(f"[{context}] Error importing flow: {e}")
 
 
 app = FastAPI(
@@ -765,6 +770,9 @@ async def start_preview(session_id: str, request: Request) -> dict:
         hmr_host=hmr_host,
         hmr_client_port=hmr_client_port
     )
+
+    if server.status in ("running", "starting"):
+        await _import_flow_json(session_id, session.working_directory, context="PREVIEW")
     
     proxy_url = f"/preview/{session_id}/" if server.status == 'running' else None
     
