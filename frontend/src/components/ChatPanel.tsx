@@ -41,7 +41,7 @@ interface TodoItem {
   id?: string;
 }
 
-type WizardKey = 'goal' | 'roles' | 'modules' | 'data' | 'flow' | 'uns';
+type WizardKey = 'industry' | 'goal' | 'roles' | 'modules';
 
 type WizardData = Record<WizardKey, string>;
 
@@ -54,12 +54,10 @@ type WizardStep = {
 };
 
 const initialWizardData: WizardData = {
+  industry: '',
   goal: '',
   roles: '',
   modules: '',
-  data: '',
-  flow: '',
-  uns: '',
 };
 
 // Extract the latest todos from tool_use array
@@ -1010,6 +1008,12 @@ export function ChatPanel({
 
   const wizardSteps: WizardStep[] = [
     {
+      key: 'industry',
+      title: t('wizardIndustryTitle'),
+      hint: t('wizardIndustryHint'),
+      placeholder: t('wizardIndustryPlaceholder'),
+    },
+    {
       key: 'goal',
       title: t('wizardGoalTitle'),
       hint: t('wizardGoalHint'),
@@ -1026,25 +1030,6 @@ export function ChatPanel({
       title: t('wizardModulesTitle'),
       hint: t('wizardModulesHint'),
       placeholder: t('wizardModulesPlaceholder'),
-    },
-    {
-      key: 'data',
-      title: t('wizardDataTitle'),
-      hint: t('wizardDataHint'),
-      placeholder: t('wizardDataPlaceholder'),
-    },
-    {
-      key: 'flow',
-      title: t('wizardFlowTitle'),
-      hint: t('wizardFlowHint'),
-      placeholder: t('wizardFlowPlaceholder'),
-    },
-    {
-      key: 'uns',
-      title: t('wizardUnsTitle'),
-      hint: t('wizardUnsHint'),
-      placeholder: t('wizardUnsPlaceholder'),
-      optional: true,
     },
   ];
 

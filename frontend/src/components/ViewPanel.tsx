@@ -66,8 +66,9 @@ interface ViewPanelProps {
 }
 
 export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initialTab }: ViewPanelProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const tText = t as (key: string) => string;
+  const stopPreviewLabel = locale === 'zh' ? '停止预览' : 'Stop Preview';
   // Production (build mode) status
   const [status, setStatus] = useState<ViewStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -657,10 +658,10 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 size="sm"
                 onClick={handleStopPreview}
                 disabled={previewLoading}
-                className="h-6 sm:h-7 rounded-lg px-1.5 sm:px-2.5 text-xs btn-glow flex items-center gap-0.5 sm:gap-1"
+                className="h-8 sm:h-7 rounded-lg px-2.5 sm:px-2.5 text-[11px] sm:text-xs btn-glow flex items-center gap-1"
               >
                 <StopIcon />
-                <span className="hidden sm:inline">{t('stop')}</span>
+                <span>{stopPreviewLabel}</span>
               </Button>
             )}
             {activeTab === 'production' && isRunning && (
