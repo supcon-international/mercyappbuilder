@@ -14,6 +14,24 @@
 - **国际化**: 中英文切换
 - **错误恢复**: API 重试、错误边界、断线恢复
 
+## 架构设计
+
+### 组件分层
+
+- **前端 (React + Vite + Shadcn)**: 会话管理、聊天 UI、流式输出与工具调用可视化、View/Flow 嵌入。
+- **后端 (FastAPI)**: API、SSE、WebSocket 代理、会话管理、Preview/View/Flow 进程编排。
+- **Agent 执行器 (Claude Agent SDK)**: 在 Session 目录内执行工具与文件操作，支持流式输出与权限回调。
+- **Session 存储 (SQLite + 文件系统)**: `.sessions/` 保存工作目录与 `sessions.db`，支持重启恢复。
+- **Flow 服务 (Node-RED)**: 共享实例，`/flow` 下的编辑器与 API 统一代理。
+
+### 数据与控制流
+
+1. 前端通过 `POST /sessions` 创建会话，后端生成独立工作目录。
+2. 聊天请求走 `/sessions/{id}/chat/stream`（SSE），由 Agent 执行器调用 Claude SDK。
+3. 会话状态与消息写入 `.sessions/sessions.db`，工作产物写入会话目录。
+4. 若检测到 Web 项目，后端可启动 Preview/View，并通过 `/preview/{id}`、`/view/{id}` 统一代理访问。
+5. 若存在 `flow.json`，自动导入共享 Node-RED，并通过 `/flow/*` 访问编辑器与 API。
+
 ## 快速开始
 
 ### 生产模式（推荐）
@@ -48,8 +66,25 @@ cd frontend && npm run dev
 |------|------|------|
 | API + 前端 | 8000 | FastAPI，同时服务静态前端和 API |
 | Preview | 5001-5100 | 动态分配，Vite Dev Server (HMR 热更新) |
-| Production | 4001-4100 | 动态分配，构建后的静态文件预览 |
+| Production View | 4001-4100 | 动态分配，构建后的静态文件预览 |
 | Flow | 1880 | 共享 Node-RED 实例（通过 `/flow/*` 代理） |
+
+## 网络结构
+
+所有外部访问统一走 `:8000`，后端在同端口代理内部服务，便于公网穿透与域名接入。
+
+```
+Browser
+  └─ HTTP(S) :8000
+      ├─ /api/*, /sessions/* → FastAPI (会话/聊天/SSE)
+      ├─ /preview/{session_id}/* → Vite Dev Server :5001-5100 (HMR wss)
+      ├─ /view/{session_id}/* → Build 静态服务器 :4001-4100
+      └─ /flow/* → Node-RED :1880 (编辑器 + /flow/api)
+```
+
+要点说明：
+- **HMR**: Preview 会注入 `VITE_BASE=/preview/{session_id}/`，前端通过 `wss` 与 HMR 通道通信。
+- **代理路径**: `/preview/{id}`、`/view/{id}`、`/flow/*` 均由后端反向代理到本地端口。
 
 ## 公网访问（Tunnel）
 
