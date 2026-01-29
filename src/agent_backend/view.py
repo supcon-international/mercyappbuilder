@@ -302,7 +302,7 @@ class ViewManager:
                 print(f"[VIEW] Flow import failed: {result.get('message')}")
         except Exception as e:
             print(f"[VIEW] Error importing flow: {e}")
-
+    
     async def _build_and_serve(self, session_id: str, project_dir: str, port: int, candidates: List[str]) -> ViewServer:
         """Build project and start a static server."""
         server = ViewServer(

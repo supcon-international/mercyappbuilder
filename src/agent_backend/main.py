@@ -102,6 +102,7 @@ async def periodic_cleanup():
         await asyncio.sleep(300)  # Run every 5 minutes
         if session_manager:
             await session_manager.cleanup_inactive_sessions(max_idle_minutes=60)
+            await session_manager.recover_stuck_busy_sessions(max_busy_minutes=30)
 
 
 async def _auto_start_preview_and_flow(session_id: str):
@@ -311,6 +312,16 @@ async def update_session(session_id: str, request: UpdateSessionRequest) -> Sess
     if request.display_name is not None:
         await manager.update_display_name(session_id, request.display_name)
     
+    return session.get_info()
+
+
+@app.post("/sessions/{session_id}/recover", response_model=SessionInfo, tags=["Sessions"])
+async def recover_session(session_id: str, reset_sdk: bool = False) -> SessionInfo:
+    """Recover a session stuck in BUSY state or otherwise blocked."""
+    manager = get_session_manager()
+    session = await manager.recover_session(session_id, reset_sdk=reset_sdk)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return session.get_info()
 
 

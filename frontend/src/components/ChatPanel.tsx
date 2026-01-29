@@ -921,7 +921,7 @@ function BuildMeFlip() {
   }, []);
 
   return (
-    <span className="inline-flex items-center min-w-[3ch] text-primary font-bold">
+    <span className="inline-flex items-center min-w-[3ch] text-green-800 font-bold">
       <span
         className={`inline-block transition-all duration-500 transform ${
           animating ? '-translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
@@ -1058,8 +1058,8 @@ export function ChatPanel({
       <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 relative overflow-hidden">
         {/* Background ambient glow */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-[100px] animate-pulse" style={{ animationDuration: '8s' }} />
-          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-blue-500/10 rounded-full blur-[80px] animate-pulse" style={{ animationDuration: '10s' }} />
+          <div className="absolute top-1/4 left-1/4 w-[560px] h-[560px] bg-primary/40 rounded-full blur-[120px] animate-pulse" style={{ animationDuration: '7s' }} />
+          <div className="absolute bottom-1/4 right-1/4 w-[420px] h-[420px] bg-blue-500/30 rounded-full blur-[110px] animate-pulse" style={{ animationDuration: '9s' }} />
         </div>
 
         <div className="relative z-10 flex flex-col items-center max-w-lg text-center">

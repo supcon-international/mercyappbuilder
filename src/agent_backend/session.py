@@ -49,6 +49,8 @@ class Session:
         self._lock = asyncio.Lock()
         # SDK session ID for multi-turn conversation
         self.sdk_session_id = sdk_session_id
+        # Track when the session entered BUSY state (for recovery)
+        self.busy_since: datetime | None = None
         # Database reference for incremental saves
         self._db = db
         
@@ -110,6 +112,7 @@ class Session:
     def close(self) -> None:
         """Close the session."""
         self.status = SessionStatus.CLOSED
+        self.busy_since = None
         self.update_activity()
     
     def to_dict(self) -> dict[str, Any]:
@@ -206,6 +209,12 @@ class SessionManager:
                         # Reactivate closed sessions - user should be able to continue
                         if session.status == SessionStatus.CLOSED:
                             session.status = SessionStatus.ACTIVE
+                            session.busy_since = None
+                            self._save_session(session)
+                        # Busy sessions cannot resume after restart - recover to active
+                        if session.status == SessionStatus.BUSY:
+                            session.status = SessionStatus.ACTIVE
+                            session.busy_since = None
                             self._save_session(session)
                         self._sessions[session.session_id] = session
                 except Exception as e:
@@ -426,6 +435,38 @@ class SessionManager:
                 self._db.update_display_name(session_id, normalized)
                 return True
             return False
+
+    async def recover_session(self, session_id: str, reset_sdk: bool = False) -> Session | None:
+        """Recover a session stuck in BUSY or otherwise unusable state."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.status = SessionStatus.ACTIVE
+            session.busy_since = None
+            if reset_sdk:
+                session.sdk_session_id = None
+                self._db.update_sdk_session_id(session_id, None)
+            session.update_activity()
+            self._save_session(session)
+            return session
+
+    async def recover_stuck_busy_sessions(self, max_busy_minutes: int = 30) -> list[str]:
+        """Recover sessions that have been BUSY for too long."""
+        now = datetime.now()
+        recovered: list[str] = []
+        async with self._lock:
+            for session in self._sessions.values():
+                if session.status != SessionStatus.BUSY:
+                    continue
+                since = session.busy_since or session.last_activity
+                busy_minutes = (now - since).total_seconds() / 60
+                if busy_minutes > max_busy_minutes:
+                    session.status = SessionStatus.ACTIVE
+                    session.busy_since = None
+                    self._save_session(session)
+                    recovered.append(session.session_id)
+        return recovered
     
     async def cleanup_inactive_sessions(self, max_idle_minutes: int = 60) -> int:
         """Mark sessions as idle when they have been inactive for too long."""

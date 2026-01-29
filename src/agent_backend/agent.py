@@ -1,5 +1,6 @@
 """Agent wrapper for Claude Agent SDK."""
 
+from datetime import datetime
 from typing import Any, AsyncGenerator, AsyncIterable, Callable, Awaitable
 
 from claude_agent_sdk import ClaudeAgentOptions, query
@@ -147,6 +148,7 @@ class AgentExecutor:
         """Execute a query and return the complete response."""
         async with self.session._lock:
             self.session.status = SessionStatus.BUSY
+            self.session.busy_since = datetime.now()
         
         try:
             # Add user message to history
@@ -222,6 +224,7 @@ class AgentExecutor:
         finally:
             async with self.session._lock:
                 self.session.status = SessionStatus.ACTIVE
+                self.session.busy_since = None
     
     async def execute_stream(self, message: str) -> AsyncGenerator[dict[str, Any], None]:
         """Execute a query and stream the response with character-level streaming.
@@ -233,6 +236,7 @@ class AgentExecutor:
         
         async with self.session._lock:
             self.session.status = SessionStatus.BUSY
+            self.session.busy_since = datetime.now()
         
         # Queue for events (including permission requests)
         event_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -288,6 +292,7 @@ class AgentExecutor:
             # Start heartbeat task
             heartbeat_task = asyncio.create_task(send_heartbeats())
             
+            MAX_QUERY_SECONDS = 20 * 60
             try:
                 # Add user message to history
                 self.session.add_message("user", message)
@@ -296,133 +301,135 @@ class AgentExecutor:
                 prompt = self._build_prompt_with_context(message)
                 prompt_iterable = single_prompt_iterable(prompt, self.session.sdk_session_id)
                 
-                async for msg in query(prompt=prompt_iterable, options=options):
-                    current_time = asyncio.get_event_loop().time()
-                    
-                    # Periodic save of partial response
-                    if current_time - last_save_time >= SAVE_INTERVAL and response_text:
-                        print(f"[SAVE] Periodic save: {len(response_text)} chars, {len(tool_results)} tools")
-                        # We don't actually save here to avoid duplicate messages,
-                        # but we log to track progress
-                        last_save_time = current_time
-                    msg_type = type(msg).__name__
-                    
-                    # Capture SDK session ID
-                    if msg_type == "SystemMessage":
-                        if hasattr(msg, "data") and isinstance(msg.data, dict):
-                            sdk_session_id = msg.data.get("session_id")
-                            if sdk_session_id:
-                                self.session.sdk_session_id = sdk_session_id
-                    
-                    # Handle streaming events
-                    elif msg_type == "StreamEvent":
-                        if hasattr(msg, "event") and isinstance(msg.event, dict):
-                            event = msg.event
-                            event_type = event.get("type", "")
-                            
-                            if event_type == "content_block_delta":
-                                delta = event.get("delta", {})
-                                delta_type = delta.get("type", "")
-                                
-                                if delta_type == "text_delta":
-                                    text_chunk = delta.get("text", "")
-                                    if text_chunk:
-                                        response_text += text_chunk
+                async with asyncio.timeout(MAX_QUERY_SECONDS):
+                    async for msg in query(prompt=prompt_iterable, options=options):
+                        current_time = asyncio.get_event_loop().time()
+
+                        # Periodic save of partial response
+                        if current_time - last_save_time >= SAVE_INTERVAL and response_text:
+                            print(f"[SAVE] Periodic save: {len(response_text)} chars, {len(tool_results)} tools")
+                            # We don't actually save here to avoid duplicate messages,
+                            # but we log to track progress
+                            last_save_time = current_time
+
+                        msg_type = type(msg).__name__
+
+                        # Capture SDK session ID
+                        if msg_type == "SystemMessage":
+                            if hasattr(msg, "data") and isinstance(msg.data, dict):
+                                sdk_session_id = msg.data.get("session_id")
+                                if sdk_session_id:
+                                    self.session.sdk_session_id = sdk_session_id
+
+                        # Handle streaming events
+                        elif msg_type == "StreamEvent":
+                            if hasattr(msg, "event") and isinstance(msg.event, dict):
+                                event = msg.event
+                                event_type = event.get("type", "")
+
+                                if event_type == "content_block_delta":
+                                    delta = event.get("delta", {})
+                                    delta_type = delta.get("type", "")
+
+                                    if delta_type == "text_delta":
+                                        text_chunk = delta.get("text", "")
+                                        if text_chunk:
+                                            response_text += text_chunk
+                                            await emit({
+                                                "type": "text_delta",
+                                                "content": text_chunk,
+                                                "session_id": self.session.session_id
+                                            })
+
+                                    elif delta_type == "thinking_delta":
+                                        thinking_chunk = delta.get("thinking", "")
+                                        if thinking_chunk:
+                                            thinking_text += thinking_chunk
+                                            await emit({
+                                                "type": "thinking_delta",
+                                                "content": thinking_chunk,
+                                                "session_id": self.session.session_id
+                                            })
+
+                                    elif delta_type == "input_json_delta":
+                                        json_chunk = delta.get("partial_json", "")
+                                        if json_chunk:
+                                            await emit({
+                                                "type": "tool_input_delta",
+                                                "content": json_chunk,
+                                                "tool_id": current_tool_id,
+                                                "session_id": self.session.session_id
+                                            })
+
+                                elif event_type == "content_block_start":
+                                    content_block = event.get("content_block", {})
+                                    block_type = content_block.get("type", "")
+
+                                    if block_type == "tool_use":
+                                        tool_name = content_block.get("name", "unknown")
+                                        tool_id = content_block.get("id", "")
+                                        current_tool_id = tool_id
+                                        tool_results.append({
+                                            "tool": tool_name,
+                                            "input": {},
+                                            "id": tool_id,
+                                        })
                                         await emit({
-                                            "type": "text_delta",
-                                            "content": text_chunk,
+                                            "type": "tool_use_start",
+                                            "content": {"tool": tool_name, "id": tool_id},
                                             "session_id": self.session.session_id
                                         })
-                                
-                                elif delta_type == "thinking_delta":
-                                    thinking_chunk = delta.get("thinking", "")
-                                    if thinking_chunk:
-                                        thinking_text += thinking_chunk
+
+                                    elif block_type == "thinking":
                                         await emit({
-                                            "type": "thinking_delta",
-                                            "content": thinking_chunk,
+                                            "type": "thinking_start",
+                                            "content": "",
                                             "session_id": self.session.session_id
                                         })
-                                
-                                elif delta_type == "input_json_delta":
-                                    json_chunk = delta.get("partial_json", "")
-                                    if json_chunk:
+
+                                elif event_type == "content_block_stop":
+                                    if current_tool_id:
                                         await emit({
-                                            "type": "tool_input_delta",
-                                            "content": json_chunk,
-                                            "tool_id": current_tool_id,
+                                            "type": "tool_use_end",
+                                            "content": {"id": current_tool_id},
                                             "session_id": self.session.session_id
                                         })
-                            
-                            elif event_type == "content_block_start":
-                                content_block = event.get("content_block", {})
-                                block_type = content_block.get("type", "")
-                                
-                                if block_type == "tool_use":
-                                    tool_name = content_block.get("name", "unknown")
-                                    tool_id = content_block.get("id", "")
-                                    current_tool_id = tool_id
-                                    tool_results.append({
-                                        "tool": tool_name,
-                                        "input": {},
-                                        "id": tool_id,
-                                    })
-                                    await emit({
-                                        "type": "tool_use_start",
-                                        "content": {"tool": tool_name, "id": tool_id},
-                                        "session_id": self.session.session_id
-                                    })
-                                
-                                elif block_type == "thinking":
-                                    await emit({
-                                        "type": "thinking_start",
-                                        "content": "",
-                                        "session_id": self.session.session_id
-                                    })
-                            
-                            elif event_type == "content_block_stop":
-                                if current_tool_id:
-                                    await emit({
-                                        "type": "tool_use_end",
-                                        "content": {"id": current_tool_id},
-                                        "session_id": self.session.session_id
-                                    })
-                                    current_tool_id = None
-                    
-                    # Handle tool results
-                    elif msg_type == "ToolResultMessage":
-                        result_content = ""
-                        if hasattr(msg, "content"):
-                            if isinstance(msg.content, str):
-                                result_content = msg.content
-                            elif isinstance(msg.content, list):
-                                for item in msg.content:
-                                    if hasattr(item, "text"):
-                                        result_content += item.text
-                        
-                        if hasattr(msg, "tool_use_id") and tool_results:
-                            for tool in tool_results:
-                                if tool.get("id") == msg.tool_use_id:
-                                    tool["result"] = result_content
-                                    break
-                        
-                        await emit({
-                            "type": "tool_result",
-                            "content": result_content,
-                            "session_id": self.session.session_id
-                        })
-                    
-                    # Final assistant message
-                    elif msg_type == "AssistantMessage":
-                        if hasattr(msg, "content") and msg.content:
-                            for block in msg.content:
-                                if type(block).__name__ == "ToolUseBlock":
-                                    tool_id = getattr(block, "id", "")
-                                    tool_input = getattr(block, "input", {})
-                                    for tool in tool_results:
-                                        if tool.get("id") == tool_id:
-                                            tool["input"] = tool_input
-                                            break
+                                        current_tool_id = None
+
+                        # Handle tool results
+                        elif msg_type == "ToolResultMessage":
+                            result_content = ""
+                            if hasattr(msg, "content"):
+                                if isinstance(msg.content, str):
+                                    result_content = msg.content
+                                elif isinstance(msg.content, list):
+                                    for item in msg.content:
+                                        if hasattr(item, "text"):
+                                            result_content += item.text
+
+                            if hasattr(msg, "tool_use_id") and tool_results:
+                                for tool in tool_results:
+                                    if tool.get("id") == msg.tool_use_id:
+                                        tool["result"] = result_content
+                                        break
+
+                            await emit({
+                                "type": "tool_result",
+                                "content": result_content,
+                                "session_id": self.session.session_id
+                            })
+
+                        # Final assistant message
+                        elif msg_type == "AssistantMessage":
+                            if hasattr(msg, "content") and msg.content:
+                                for block in msg.content:
+                                    if type(block).__name__ == "ToolUseBlock":
+                                        tool_id = getattr(block, "id", "")
+                                        tool_input = getattr(block, "input", {})
+                                        for tool in tool_results:
+                                            if tool.get("id") == tool_id:
+                                                tool["input"] = tool_input
+                                                break
                 
                 # Save assistant message
                 print(f"[SAVE] Saving assistant message: {len(response_text)} chars, {len(tool_results)} tools")
@@ -441,6 +448,24 @@ class AgentExecutor:
                     "is_complete": True
                 })
                 
+            except asyncio.TimeoutError:
+                query_error = asyncio.TimeoutError("Agent execution timed out")
+                print(f"[ERROR] Timeout after {MAX_QUERY_SECONDS}s for session {self.session.session_id}")
+                # Stop heartbeat
+                query_running = False
+                heartbeat_task.cancel()
+                if response_text:
+                    self.session.add_message(
+                        "assistant",
+                        response_text + "\n\n[Response interrupted - timeout]",
+                        tool_use=tool_results if tool_results else None,
+                        thinking=thinking_text if thinking_text else None
+                    )
+                await emit({
+                    "type": "error",
+                    "content": "Agent execution timed out",
+                    "session_id": self.session.session_id
+                })
             except asyncio.CancelledError:
                 # Task was cancelled (e.g., client disconnected)
                 print(f"[SAVE] Task cancelled, saving partial response: {len(response_text)} chars")
@@ -495,6 +520,7 @@ class AgentExecutor:
                     await event_queue.put(None)  # Signal end
                 async with self.session._lock:
                     self.session.status = SessionStatus.ACTIVE
+                    self.session.busy_since = None
         
         query_task = None
         try:
