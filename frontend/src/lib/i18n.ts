@@ -72,6 +72,7 @@ export const translations = {
     retry: '重试',
     viewProject: '查看项目',
     viewHint: '点击构建按钮构建并查看项目',
+    downloadPackage: '下载构建包',
     flow: 'Flow',
     flowTab: 'Flow',
     flowTitle: 'Flow 编排',
@@ -116,6 +117,8 @@ export const translations = {
     refreshHistory: '刷新历史',
     collapseSidebar: '收起侧边栏',
     expandSidebar: '展开侧边栏',
+    claudeMdLoaded: 'claude.md 已加载',
+    claudeMdMissing: 'claude.md 未加载',
 
     // Wizard
     wizardTitle: 'MES 应用构建向导',
@@ -216,6 +219,7 @@ export const translations = {
     retry: 'Retry',
     viewProject: 'View Project',
     viewHint: 'Click Build to build and view project',
+    downloadPackage: 'Download package',
     flow: 'Flow',
     flowTab: 'Flow',
     flowTitle: 'Flow Editor',
@@ -260,6 +264,8 @@ export const translations = {
     refreshHistory: 'Refresh history',
     collapseSidebar: 'Collapse sidebar',
     expandSidebar: 'Expand sidebar',
+    claudeMdLoaded: 'claude.md loaded',
+    claudeMdMissing: 'claude.md missing',
 
     // Wizard
     wizardTitle: 'MES App Wizard',

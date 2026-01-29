@@ -1,6 +1,8 @@
 """Agent wrapper for Claude Agent SDK."""
 
 from datetime import datetime
+import os
+from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterable, Callable, Awaitable
 
 from claude_agent_sdk import ClaudeAgentOptions, query
@@ -119,11 +121,24 @@ class AgentExecutor:
             streaming: Whether this is a streaming request
             permission_callback: Optional callback for permission requests (enables interactive approval)
         """
+        # Select permission mode depending on user privileges
+        permission_mode = "acceptEdits" if os.getuid() == 0 else "bypassPermissions"
         options_kwargs: dict[str, Any] = {
             "cwd": self.session.working_directory,
             "model": self.session.model,
-            "permission_mode": "bypassPermissions",  # Requires non-root user
+            "permission_mode": permission_mode,
+            # Load settings from all sources (user/project/local)
+            "setting_sources": ["user", "project", "local"],
         }
+
+        session_dir = Path(self.session.working_directory)
+        settings_path = session_dir / ".claude" / "settings.json"
+        if settings_path.exists():
+            options_kwargs["settings"] = str(settings_path)
+
+        plugin_dir = session_dir / ".claude" / "plugins"
+        if plugin_dir.exists():
+            options_kwargs["plugins"] = [{"type": "local", "path": str(plugin_dir)}]
         
         # Build enhanced system prompt that references claude.md
         base_prompt = self.session.system_prompt or ""

@@ -7,6 +7,7 @@ export interface Session {
   message_count: number;
   model: string;
   display_name?: string | null;
+  claude_md_loaded?: boolean;
 }
 
 export interface CreateSessionRequest {

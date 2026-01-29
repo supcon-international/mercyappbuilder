@@ -7,7 +7,9 @@ import shutil
 import signal
 import socket
 import subprocess
+import zipfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from .flow import get_flow_manager
@@ -23,6 +25,8 @@ class ViewServer:
     status: str  # 'building', 'running', 'stopped', 'error'
     error: Optional[str] = None
     candidates_found: List[str] = field(default_factory=list)
+    package_path: Optional[str] = None
+    package_error: Optional[str] = None
 
 
 class ViewManager:
@@ -166,6 +170,104 @@ class ViewManager:
         print(f"[VIEW] Selected project: {best} (from {len(candidates)} candidates)")
         
         return best, candidates
+
+    def _find_uns_file(self, session_dir: str) -> Optional[str]:
+        """Find uns.json within the session directory."""
+        base_dir = Path(session_dir)
+        candidates = [
+            base_dir / "app" / "uns.json",
+            base_dir / "app" / "UNS.json",
+            base_dir / "uns.json",
+            base_dir / "UNS.json",
+        ]
+        for path in candidates:
+            if path.exists() and path.is_file():
+                return str(path)
+
+        matches: list[tuple[int, Path]] = []
+        for path in base_dir.rglob("*.json"):
+            if path.is_file() and path.name.lower() == "uns.json":
+                rel_depth = len(path.relative_to(base_dir).parts)
+                matches.append((rel_depth, path))
+        if matches:
+            matches.sort(key=lambda item: item[0])
+            return str(matches[0][1])
+
+        return None
+
+    def _find_flow_file(
+        self,
+        session_dir: str,
+        project_dir: str,
+        dist_dir: Optional[str]
+    ) -> Optional[str]:
+        """Find flow.json from common build/session locations."""
+        candidates = []
+        if dist_dir:
+            candidates.append(Path(dist_dir) / "flow.json")
+        candidates.extend([
+            Path(project_dir) / "flow.json",
+            Path(session_dir) / "flow.json",
+            Path(session_dir) / "app" / "flow.json",
+        ])
+        for path in candidates:
+            if path.exists() and path.is_file():
+                return str(path)
+        return None
+
+    def _find_build_output_dir(self, project_dir: str) -> Optional[str]:
+        """Find build output directory (dist/build)."""
+        for dir_name in ("dist", "build"):
+            dir_path = os.path.join(project_dir, dir_name)
+            if os.path.exists(dir_path):
+                return dir_path
+        return None
+
+    def _create_build_package(
+        self,
+        session_id: str,
+        session_dir: str,
+        project_dir: str,
+        dist_dir: Optional[str]
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Create a zip package with frontend source, UNS, and flow."""
+
+        artifacts_dir = os.path.join(session_dir, "artifacts")
+        os.makedirs(artifacts_dir, exist_ok=True)
+        package_path = os.path.join(artifacts_dir, f"{session_id}-build.zip")
+
+        try:
+            with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                skip_dirs = {
+                    "node_modules",
+                    ".git",
+                    ".vite",
+                    "dist",
+                    "build",
+                    "__pycache__",
+                    ".next",
+                    ".cache",
+                }
+                for root, dirs, files in os.walk(project_dir):
+                    dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+                    for file in files:
+                        if file.startswith("."):
+                            continue
+                        file_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(file_path, project_dir)
+                        zipf.write(file_path, os.path.join("frontend", rel_path))
+
+                uns_path = self._find_uns_file(session_dir)
+                if uns_path:
+                    zipf.write(uns_path, "uns.json")
+
+                flow_path = self._find_flow_file(session_dir, project_dir, dist_dir)
+                if flow_path:
+                    zipf.write(flow_path, "flow.json")
+        except Exception as e:
+            return None, f"Failed to create package: {e}"
+
+        return package_path, None
     
     async def _verify_port_listening(self, port: int, timeout: float = 10.0) -> bool:
         """Wait for a port to start listening."""
@@ -269,7 +371,7 @@ class ViewManager:
             self._used_ports.add(port)
             
             # Build and serve
-            return await self._build_and_serve(session_id, project_dir, port, candidates)
+            return await self._build_and_serve(session_id, working_directory, project_dir, port, candidates)
     
     async def _import_session_flow(self, session_id: str, project_dir: str) -> None:
         """Import flow.json from dist directory to Node-RED if it exists."""
@@ -303,7 +405,14 @@ class ViewManager:
         except Exception as e:
             print(f"[VIEW] Error importing flow: {e}")
     
-    async def _build_and_serve(self, session_id: str, project_dir: str, port: int, candidates: List[str]) -> ViewServer:
+    async def _build_and_serve(
+        self,
+        session_id: str,
+        session_dir: str,
+        project_dir: str,
+        port: int,
+        candidates: List[str]
+    ) -> ViewServer:
         """Build project and start a static server."""
         server = ViewServer(
             session_id=session_id,
@@ -316,6 +425,7 @@ class ViewManager:
         self._servers[session_id] = server
         
         try:
+            dist_dir = None
             # Check if we have a build script
             if self._has_build_script(project_dir):
                 max_retries = 3
@@ -388,6 +498,18 @@ class ViewManager:
                 # No build script, serve the project directory directly (static site)
                 print(f"[VIEW] No build script, serving directory directly: {project_dir}")
                 serve_dir = project_dir
+
+            # Create build package (non-fatal if it fails)
+            package_path, package_error = self._create_build_package(
+                session_id,
+                session_dir,
+                project_dir,
+                dist_dir if self._has_build_script(project_dir) else None
+            )
+            if package_error:
+                print(f"[VIEW] Package creation failed: {package_error}")
+            server.package_path = package_path
+            server.package_error = package_error
             
             # Start static server using npx serve
             print(f"[VIEW] Starting static server for {session_id} on port {port}")
@@ -486,8 +608,36 @@ class ViewManager:
                 'project_dir': server.project_dir,
                 'status': server.status,
                 'error': server.error,
-                'candidates_found': server.candidates_found
+                'candidates_found': server.candidates_found,
+                'package_ready': bool(server.package_path and os.path.exists(server.package_path)),
+                'package_error': server.package_error
             }
+
+    async def get_or_create_package(self, session_id: str, session_dir: str) -> Optional[str]:
+        """Get existing package path or create one if build output exists."""
+        async with self._lock:
+            server = self._servers.get(session_id)
+            if server and server.package_path and os.path.exists(server.package_path):
+                return server.package_path
+
+        project_dir, _ = self._find_project_dir(session_dir)
+        if not project_dir:
+            return None
+        dist_dir = self._find_build_output_dir(project_dir)
+        package_path, package_error = self._create_build_package(
+            session_id,
+            session_dir,
+            project_dir,
+            dist_dir
+        )
+
+        async with self._lock:
+            server = self._servers.get(session_id)
+            if server:
+                server.package_path = package_path
+                server.package_error = package_error
+
+        return package_path
     
     async def cleanup_all(self):
         """Stop all view servers."""

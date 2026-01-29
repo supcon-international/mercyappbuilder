@@ -613,7 +613,9 @@ async def start_view(session_id: str, request: Request) -> dict:
         'local_url': f'http://localhost:{server.port}' if server.status == 'running' else None,
         'project_dir': server.project_dir,
         'status': server.status,
-        'error': server.error
+        'error': server.error,
+        'package_ready': bool(server.package_path and os.path.exists(server.package_path)),
+        'package_error': server.package_error
     }
 
 
@@ -652,6 +654,25 @@ async def get_view_status(session_id: str, request: Request) -> dict:
         status['local_url'] = f"http://localhost:{status.get('port')}"
     
     return status
+
+
+@app.get("/sessions/{session_id}/view/package", tags=["View"])
+async def download_view_package(session_id: str) -> FileResponse:
+    """Download the build package (frontend dist + UNS + flow)."""
+    manager = get_session_manager()
+    session = await manager.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    view_mgr = get_view_manager()
+    package_path = await view_mgr.get_or_create_package(session_id, session.working_directory)
+
+    if not package_path or not os.path.exists(package_path):
+        raise HTTPException(status_code=404, detail="Build package not found")
+
+    filename = f"{session_id}-build.zip"
+    return FileResponse(package_path, filename=filename, media_type="application/zip")
 
 
 # ============================================================================
@@ -707,9 +728,9 @@ async def proxy_view(session_id: str, path: str, request: Request) -> Response:
                 follow_redirects=False,
             )
             
-            # Filter response headers (keep content-encoding for proper decompression)
+            # Filter response headers (strip content-encoding to avoid decode mismatch)
             response_headers = {}
-            skip_response_headers = {'transfer-encoding', 'connection'}
+            skip_response_headers = {'transfer-encoding', 'connection', 'content-encoding'}
             for key, value in response.headers.items():
                 if key.lower() not in skip_response_headers:
                     response_headers[key] = value

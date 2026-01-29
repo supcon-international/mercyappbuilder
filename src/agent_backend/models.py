@@ -52,6 +52,7 @@ class SessionInfo(BaseModel):
     message_count: int = Field(default=0, description="Number of messages in session")
     model: str = Field(..., description="Claude model being used")
     display_name: str | None = Field(default=None, description="Display name for the session")
+    claude_md_loaded: bool = Field(default=False, description="Whether claude.md is loaded")
 
 
 class ChatMessage(BaseModel):

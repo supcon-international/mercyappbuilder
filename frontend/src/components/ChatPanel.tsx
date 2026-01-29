@@ -1133,6 +1133,14 @@ export function ChatPanel({
             <Badge variant="secondary" className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2 hidden sm:inline-flex">
               {session.model.split('-').slice(0,2).join('-')}
             </Badge>
+            {session.claude_md_loaded !== undefined && (
+              <Badge
+                variant={session.claude_md_loaded ? 'default' : 'secondary'}
+                className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2 hidden sm:inline-flex"
+              >
+                {session.claude_md_loaded ? t('claudeMdLoaded') : t('claudeMdMissing')}
+              </Badge>
+            )}
             <Badge
               variant={session.status === 'active' ? 'default' : 'secondary'}
               className="text-xs rounded-lg font-normal h-5 px-1.5 sm:px-2"

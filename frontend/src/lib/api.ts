@@ -297,6 +297,8 @@ export interface ViewStatus {
   port: number | null;
   project_dir: string | null;
   error: string | null;
+  package_ready?: boolean;
+  package_error?: string | null;
 }
 
 export interface PreviewStatus {

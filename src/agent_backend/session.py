@@ -98,6 +98,7 @@ class Session:
     
     def get_info(self) -> SessionInfo:
         """Get session information."""
+        claude_md_loaded = Path(self.working_directory, "claude.md").exists()
         return SessionInfo(
             session_id=self.session_id,
             working_directory=self.working_directory,
@@ -107,6 +108,7 @@ class Session:
             message_count=len(self.messages),
             model=self.model,
             display_name=self.display_name,
+            claude_md_loaded=claude_md_loaded,
         )
     
     def close(self) -> None:
@@ -322,6 +324,38 @@ class SessionManager:
                 print(f"Copied claude.md to {working_directory}")
         except Exception as e:
             print(f"Warning: Failed to copy claude.md: {e}")
+
+    def _copy_global_skills(self, working_directory: str) -> None:
+        """Copy ~/.claude and ~/.agents skills/plugins into the session."""
+        try:
+            session_dir = Path(working_directory)
+
+            def copy_tree(source: Path, dest: Path) -> None:
+                if not source.exists():
+                    return
+                if dest.exists():
+                    shutil.rmtree(dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(source, dest)
+
+            # ~/.claude/skills and ~/.claude/plugins
+            home_claude = Path(os.path.expanduser("~/.claude"))
+            if home_claude.exists():
+                copy_tree(home_claude / "skills", session_dir / ".claude" / "skills")
+                copy_tree(home_claude / "plugins", session_dir / ".claude" / "plugins")
+
+            # ~/.agents/skills (common for Cursor skills)
+            home_agents = Path(os.path.expanduser("~/.agents"))
+            if home_agents.exists():
+                copy_tree(home_agents / "skills", session_dir / ".agents" / "skills")
+                # Also mirror into .claude/skills for compatibility if empty
+                claude_skills = session_dir / ".claude" / "skills"
+                if not claude_skills.exists() or not any(claude_skills.iterdir()):
+                    copy_tree(home_agents / "skills", claude_skills)
+
+            print(f"Copied global skills/plugins into {session_dir}")
+        except Exception as e:
+            print(f"Warning: Failed to copy global skills: {e}")
     
     async def create_session(
         self,
@@ -349,6 +383,8 @@ class SessionManager:
         
         # Copy claude.md from project root to session directory
         self._copy_claude_md(working_directory)
+        # Copy global skills into the session directory
+        self._copy_global_skills(working_directory)
         
         async with self._lock:
             self._sessions[session_id] = session

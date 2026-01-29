@@ -69,19 +69,23 @@ function App() {
     setIsResizing(false);
   }, []);
   
-  const handleMouseMove = useCallback((e: MouseEvent) => {
+  const handleResizeMove = useCallback((clientX: number) => {
     if (!isResizing || !containerRef.current) return;
-    
+
     const container = containerRef.current;
     const rect = container.getBoundingClientRect();
     const sidebarWidth = 256; // approximate sidebar width
     const availableWidth = rect.width - sidebarWidth;
-    const mouseX = e.clientX - rect.left - sidebarWidth;
+    const mouseX = clientX - rect.left - sidebarWidth;
     const percentage = (mouseX / availableWidth) * 100;
-    
+
     // Clamp between 20% and 80%
     setChatWidth(Math.min(80, Math.max(20, percentage)));
   }, [isResizing]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    handleResizeMove(e.clientX);
+  }, [handleResizeMove]);
   
   useEffect(() => {
     if (isResizing) {
@@ -233,6 +237,14 @@ function App() {
           >
             <div className="w-0.5 h-8 bg-border group-hover:bg-primary rounded-full" />
           </div>
+        )}
+
+        {isResizing && (
+          <div
+            className="fixed inset-0 z-40 cursor-col-resize"
+            onMouseMove={(event) => handleResizeMove(event.clientX)}
+            onMouseUp={handleMouseUp}
+          />
         )}
 
         {/* View Panel - Responsive & Resizable */}

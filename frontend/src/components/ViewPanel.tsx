@@ -31,6 +31,14 @@ const ExternalLinkIcon = () => (
   </svg>
 );
 
+const DownloadIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+);
+
 const StopIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
     <rect x="6" y="6" width="12" height="12" rx="1"/>
@@ -280,6 +288,11 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
     }
   };
 
+  const handleDownloadPackage = useCallback(() => {
+    if (!sessionId) return;
+    window.open(`/api/sessions/${sessionId}/view/package`, '_blank');
+  }, [sessionId]);
+
   const handlePreviewRefresh = () => {
     const iframe = previewIframeRef.current;
     if (iframe && previewStatus?.url) {
@@ -468,6 +481,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
   const isPreviewStarting = previewStatus?.status === 'starting';
   const isFlowRunning = flowStatus?.status === 'running';
   const isFlowStarting = flowStatus?.status === 'starting';
+  const isPackageReady = Boolean(status?.package_ready);
   const activeStatus = activeTab === 'flow' ? flowStatus : activeTab === 'preview' ? previewStatus : status;
 
   const unsTopics = unsData?.topics || [];
@@ -675,6 +689,18 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 >
                   {editMode ? t('editing') : t('edit')}
                 </Button>
+                {isPackageReady && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleDownloadPackage}
+                    className="h-6 sm:h-7 rounded-lg px-1.5 sm:px-2.5 text-xs btn-glow flex items-center gap-1"
+                    title={tText('downloadPackage')}
+                  >
+                    <DownloadIcon />
+                    <span className="hidden sm:inline">{tText('downloadPackage')}</span>
+                  </Button>
+                )}
                 <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-6 w-6 sm:h-7 sm:w-7 p-0 rounded-lg" title="Refresh">
                   <RefreshIcon />
                 </Button>
