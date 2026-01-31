@@ -6,7 +6,7 @@ Plan before you start. Once you done each step update todolist right away.Your t
 
 ##Framework & Function & UI Baseline
 
-Build a manufacturing web app that looks modern and cool, uses #B2ED1D as the primary accent, and has a left-side module navigation rail. The app must be real logic (not static UI). All backend logic run in a NodeRED flow(Generated Flow.json), use flow variable as the data storage. FLOW NEEDS to BE THE BACKEND(FUNCTION+HTTP+more...).
+Build a manufacturing web app that looks modern and cool, uses #B2ED1D as the primary accent, and has a left-side module navigation rail. The app must be real logic (not static UI). All backend logic run in a NodeRED flow(Generated Flow.json), use flow variable as the data storage. FLOW NEEDS to BE THE BACKEND(FUNCTION+HTTP+more...). When the backend has issue, front end should be able to fallback to localstorage seed data.
 
 the app must feel “fully populated and sophisticated”: When designing the app, build many modules to make the app looks complex. Seed a richly interlinked dummy datas by NodeRED across all modules, and include enough pre-created records and states to demonstrate rich amount of end-to-end workflows.
 
