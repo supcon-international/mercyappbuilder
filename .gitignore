@@ -71,6 +71,9 @@ Thumbs.db
 logs/
 /tmp/
 
+# Backups
+backup/
+
 # Testing
 .coverage
 htmlcov/
