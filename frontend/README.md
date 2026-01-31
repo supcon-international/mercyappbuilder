@@ -14,12 +14,4 @@ npm run dev
 npm run build
 ```
 
-## E2E 测试（Playwright）
-```bash
-npm run test:e2e
-```
-可选环境变量：
-- `E2E_BASE_URL`：覆盖测试访问地址
-- `E2E_SKIP_BACKEND=1`：跳过依赖后端的动作
-
 更多整体说明请查看仓库根目录 `README.md`。

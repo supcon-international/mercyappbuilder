@@ -62,16 +62,6 @@ cd frontend && npm install && npm run dev
 ```
 开发模式访问 http://localhost:5173
 
-## E2E 测试（Playwright）
-前提：服务已启动（至少前端），建议同时启动后端与 Node-RED 以覆盖完整链路。
-```bash
-cd frontend
-npm run test:e2e
-```
-可选环境变量：
-- `E2E_BASE_URL`：覆盖测试访问地址（默认 `http://localhost:5173`）
-- `E2E_SKIP_BACKEND=1`：跳过依赖后端的动作（仅验证前端 UI）
-
 ## 端口与路由
 - API + 前端：`8000`
 - Preview（dev/HMR）：`5001-5100`

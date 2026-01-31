@@ -96,6 +96,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
   const [flowLoading, setFlowLoading] = useState(false);
   const [flowError, setFlowError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const isPackageReady = Boolean(status?.package_ready);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const flowIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -185,6 +186,17 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
     }, 2000);
     return () => clearInterval(interval);
   }, [fetchStatus, fetchPreviewStatus, status?.status, previewStatus?.status]);
+
+  // Poll production status until package is ready (download button)
+  useEffect(() => {
+    if (activeTab !== 'production' || !sessionId || isPackageReady) {
+      return;
+    }
+    const interval = setInterval(() => {
+      fetchStatus();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [activeTab, sessionId, isPackageReady, fetchStatus]);
 
   useEffect(() => {
     if (activeTab === 'uns') {
@@ -481,7 +493,6 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
   const isPreviewStarting = previewStatus?.status === 'starting';
   const isFlowRunning = flowStatus?.status === 'running';
   const isFlowStarting = flowStatus?.status === 'starting';
-  const isPackageReady = Boolean(status?.package_ready);
   const activeStatus = activeTab === 'flow' ? flowStatus : activeTab === 'preview' ? previewStatus : status;
 
   const unsTopics = unsData?.topics || [];
@@ -682,6 +693,18 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 <span>{stopPreviewLabel}</span>
               </Button>
             )}
+            {activeTab === 'production' && isPackageReady && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleDownloadPackage}
+                className="h-6 sm:h-7 rounded-lg px-1.5 sm:px-2.5 text-xs btn-glow flex items-center gap-1"
+                title={tText('downloadPackage')}
+              >
+                <DownloadIcon />
+                <span className="hidden sm:inline">{tText('downloadPackage')}</span>
+              </Button>
+            )}
             {activeTab === 'production' && isRunning && (
               <>
                 <Button
@@ -693,18 +716,6 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 >
                   {editMode ? t('editing') : t('edit')}
                 </Button>
-                {isPackageReady && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDownloadPackage}
-                    className="h-6 sm:h-7 rounded-lg px-1.5 sm:px-2.5 text-xs btn-glow flex items-center gap-1"
-                    title={tText('downloadPackage')}
-                  >
-                    <DownloadIcon />
-                    <span className="hidden sm:inline">{tText('downloadPackage')}</span>
-                  </Button>
-                )}
                 <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-6 w-6 sm:h-7 sm:w-7 p-0 rounded-lg" title="Refresh">
                   <RefreshIcon />
                 </Button>
