@@ -182,6 +182,8 @@ class ViewManager:
         candidates = [
             base_dir / "app" / "uns.json",
             base_dir / "app" / "UNS.json",
+            base_dir / "app" / "public" / "uns.json",
+            base_dir / "app" / "public" / "UNS.json",
             base_dir / "uns.json",
             base_dir / "UNS.json",
         ]
@@ -216,6 +218,7 @@ class ViewManager:
             Path(project_dir) / "flow.json",
             Path(session_dir) / "flow.json",
             Path(session_dir) / "app" / "flow.json",
+            Path(session_dir) / "app" / "public" / "flow.json",
         ])
         for path in candidates:
             if path.exists() and path.is_file():

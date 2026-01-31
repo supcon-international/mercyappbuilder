@@ -178,6 +178,7 @@ def _find_flow_json(session_dir: str) -> str | None:
         os.path.join(session_dir, "build", "flow.json"),
         os.path.join(session_dir, "flow.json"),
         os.path.join(session_dir, "app", "flow.json"),
+        os.path.join(session_dir, "app", "public", "flow.json"),
         os.path.join(session_dir, "public", "flow.json"),
     ]
     for path in flow_paths:
@@ -190,6 +191,8 @@ def _find_uns_json(session_dir: str) -> str | None:
     candidates = [
         os.path.join(session_dir, "app", "uns.json"),
         os.path.join(session_dir, "app", "UNS.json"),
+        os.path.join(session_dir, "app", "public", "uns.json"),
+        os.path.join(session_dir, "app", "public", "UNS.json"),
         os.path.join(session_dir, "uns.json"),
         os.path.join(session_dir, "UNS.json"),
         os.path.join(session_dir, "dist", "uns.json"),
