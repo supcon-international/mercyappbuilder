@@ -164,7 +164,7 @@ export function SessionList({
             }}
           >
             <DialogTrigger asChild>
-              <Button size="sm" className="w-full rounded-lg h-10 px-4 text-sm font-bold btn-glow">{t('newSession')}</Button>
+              <Button size="sm" data-testid="new-session" className="w-full rounded-lg h-10 px-4 text-sm font-bold btn-glow">{t('newSession')}</Button>
             </DialogTrigger>
             <DialogContent className="w-[95vw] max-w-md mx-auto">
               <DialogHeader>
@@ -227,7 +227,7 @@ export function SessionList({
                 <Button variant="outline" size="sm" onClick={() => setCreateDialogOpen(false)} className="btn-glow h-8">
                   {t('cancel')}
                 </Button>
-                <Button size="sm" onClick={handleCreateSession} disabled={loading} className="btn-glow h-8">
+                <Button size="sm" onClick={handleCreateSession} disabled={loading} data-testid="create-session-submit" className="btn-glow h-8">
                   {loading ? t('creating') : t('create')}
                 </Button>
               </DialogFooter>
@@ -298,6 +298,7 @@ export function SessionList({
                   return (
                 <div
                   key={session.session_id}
+                  data-testid={`session-item-${session.session_id}`}
                   className={`p-3 rounded-xl cursor-pointer transition-all duration-300 group glow-border ${
                     selectedSession?.session_id === session.session_id
                       ? 'bg-primary/15 border border-primary/30 shadow-md shadow-primary/10 scale-[1.02]'

@@ -44,6 +44,8 @@ export function useSessions() {
       // Clean up message cache
       messageCache.delete(sessionId);
       streamingState.delete(sessionId);
+      abortControllers.delete(sessionId);
+      pendingPermissions.delete(sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete session');
       throw err;
@@ -131,6 +133,7 @@ export function useChat(sessionId: string | null) {
     if (!sessionId) {
       setMessages([]);
       setStreaming(false);
+      setPermissionRequests([]);
       return;
     }
     
@@ -147,6 +150,14 @@ export function useChat(sessionId: string | null) {
       return;
     }
     
+    // Sync permission requests from cache
+    const cachedPermissions = pendingPermissions.get(sessionId);
+    if (cachedPermissions) {
+      setPermissionRequests(cachedPermissions);
+    } else {
+      setPermissionRequests([]);
+    }
+
     // Always fetch from server to ensure we have the latest messages
     // This fixes the issue where assistant messages were lost after page refresh
     setLoading(true);

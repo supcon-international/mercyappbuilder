@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import os
+import logging
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterable, Callable, Awaitable
 
@@ -59,6 +60,7 @@ class AgentExecutor:
     
     def __init__(self, session: Session):
         self.session = session
+        self._logger = logging.getLogger("appbuilder.agent")
     
     def _enhance_system_prompt(self, base_prompt: str) -> str:
         """Enhance system prompt to ensure Agent references claude.md first."""
@@ -235,7 +237,14 @@ class AgentExecutor:
                 tool_results=tool_results if tool_results else None,
                 is_complete=True
             )
-        
+        except Exception as e:
+            self._logger.error(
+                "agent_execute_failed session=%s sdk_session_id=%s error=%s",
+                self.session.session_id,
+                self.session.sdk_session_id,
+                e,
+            )
+            raise
         finally:
             async with self.session._lock:
                 self.session.status = SessionStatus.ACTIVE
@@ -307,7 +316,7 @@ class AgentExecutor:
             # Start heartbeat task
             heartbeat_task = asyncio.create_task(send_heartbeats())
             
-            MAX_QUERY_SECONDS = 20 * 60
+            MAX_QUERY_SECONDS = 30 * 60
             try:
                 # Add user message to history
                 self.session.add_message("user", message)
@@ -507,6 +516,14 @@ class AgentExecutor:
                 print(f"[ERROR] Exception message: {e}")
                 print(f"[ERROR] Exit code: {exit_code_info}")
                 print(f"[ERROR] Stderr output: {stderr_info}")
+                self._logger.error(
+                    "agent_stream_failed session=%s sdk_session_id=%s exit_code=%s stderr=%s error=%s",
+                    self.session.session_id,
+                    self.session.sdk_session_id,
+                    exit_code_info,
+                    stderr_info,
+                    e,
+                )
                 print(f"[SAVE] Error occurred, saving partial response: {e}")
                 # Stop heartbeat
                 query_running = False

@@ -158,14 +158,14 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
     setFlowLoading(true);
     setFlowError(null);
     try {
-      const result = await api.startFlow();
+      const result = await api.startFlow(sessionId);
       setFlowStatus(result);
     } catch (err) {
       setFlowError(err instanceof Error ? err.message : 'Failed to start flow');
     } finally {
       setFlowLoading(false);
     }
-  }, []);
+  }, [sessionId]);
 
   // Fetch both statuses on mount
   useEffect(() => {
@@ -560,6 +560,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 variant={activeTab === 'preview' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveTab('preview')}
+                data-testid="tab-preview"
                 className="h-6 px-2 text-[11px] rounded-md"
               >
                 Preview
@@ -568,6 +569,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 variant={activeTab === 'production' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveTab('production')}
+                data-testid="tab-production"
                 className="h-6 px-2 text-[11px] rounded-md"
               >
                 Production
@@ -576,6 +578,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 variant={activeTab === 'uns' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveTab('uns')}
+                data-testid="tab-uns"
                 className="h-6 px-2 text-[11px] rounded-md"
               >
                 UNS
@@ -584,6 +587,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 variant={activeTab === 'flow' ? 'default' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveTab('flow')}
+                data-testid="tab-flow"
                 className="h-6 px-2 text-[11px] rounded-md"
               >
                 {tText('flowTab')}
@@ -777,6 +781,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
             id="preview-iframe"
             ref={previewIframeRef}
             src={previewStatus.url}
+            data-testid="preview-iframe"
             className="w-full h-full border-0 bg-white"
             title="Preview"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
@@ -799,6 +804,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 size="lg"
                 onClick={handleStartPreview}
                 disabled={previewLoading}
+                data-testid="start-preview"
                 className="rounded-xl px-8 py-3 h-12 text-sm font-medium btn-glow flex items-center gap-2 mx-auto"
               >
                 <PlayIcon />
@@ -831,6 +837,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
             id="view-iframe"
             ref={iframeRef}
             src={status.url}
+            data-testid="production-iframe"
             className="w-full h-full border-0 bg-white"
             title="Production"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
@@ -853,6 +860,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 size="lg"
                 onClick={handleStart}
                 disabled={loading}
+                data-testid="start-production"
                 className="rounded-xl px-8 py-3 h-12 text-sm font-medium btn-glow flex items-center gap-2 mx-auto"
               >
                 <PlayIcon />
@@ -1048,6 +1056,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
             id="flow-iframe"
             ref={flowIframeRef}
             src={sessionId ? `${flowStatus.url}#flow/${sessionId}` : flowStatus.url}
+            data-testid="flow-iframe"
             className="w-full h-full border-0 bg-white"
             title="Flow"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
@@ -1069,6 +1078,7 @@ export function ViewPanel({ sessionId, onSelectComponentContext, onClose, initia
                 size="lg"
                 onClick={startFlow}
                 disabled={flowLoading}
+                data-testid="start-flow"
                 className="rounded-xl px-8 py-3 h-12 text-sm font-medium btn-glow flex items-center gap-2 mx-auto"
               >
                 <PlayIcon />

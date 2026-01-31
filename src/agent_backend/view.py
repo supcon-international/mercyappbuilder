@@ -1,7 +1,9 @@
 """View server management for session web projects (build mode only)."""
 
 import asyncio
+import logging
 import json
+import time
 import os
 import shutil
 import signal
@@ -38,7 +40,10 @@ class ViewManager:
     def __init__(self):
         self._servers: Dict[str, ViewServer] = {}
         self._used_ports: set[int] = set()
+        self._package_cache: Dict[str, dict] = {}
+        self._force_clean_build: set[str] = set()
         self._lock = asyncio.Lock()
+        self._logger = logging.getLogger("appbuilder.view")
     
     def _is_port_in_use(self, port: int) -> bool:
         """Check if a port is currently in use."""
@@ -206,6 +211,8 @@ class ViewManager:
         if dist_dir:
             candidates.append(Path(dist_dir) / "flow.json")
         candidates.extend([
+            Path(session_dir) / "dist" / "flow.json",
+            Path(session_dir) / "build" / "flow.json",
             Path(project_dir) / "flow.json",
             Path(session_dir) / "flow.json",
             Path(session_dir) / "app" / "flow.json",
@@ -237,7 +244,7 @@ class ViewManager:
         package_path = os.path.join(artifacts_dir, f"{session_id}-build.zip")
 
         try:
-            with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zipf:
                 skip_dirs = {
                     "node_modules",
                     ".git",
@@ -247,9 +254,17 @@ class ViewManager:
                     "__pycache__",
                     ".next",
                     ".cache",
+                    ".claude",
+                    ".agents",
+                    ".sessions",
+                    "artifacts",
+                    "logs",
                 }
                 for root, dirs, files in os.walk(project_dir):
-                    dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
+                    dirs[:] = [
+                        d for d in dirs
+                        if d not in skip_dirs and not d.startswith(".")
+                    ]
                     for file in files:
                         if file.startswith("."):
                             continue
@@ -268,6 +283,19 @@ class ViewManager:
             return None, f"Failed to create package: {e}"
 
         return package_path, None
+
+    def _cache_package(
+        self,
+        session_id: str,
+        project_dir: str,
+        package_path: Optional[str],
+        package_error: Optional[str]
+    ) -> None:
+        self._package_cache[session_id] = {
+            "project_dir": project_dir,
+            "package_path": package_path,
+            "package_error": package_error,
+        }
     
     async def _verify_port_listening(self, port: int, timeout: float = 10.0) -> bool:
         """Wait for a port to start listening."""
@@ -285,10 +313,14 @@ class ViewManager:
             if session_id in self._servers:
                 server = self._servers[session_id]
                 # Only return existing if truly healthy
-                if server.status == 'running' and server.process and server.process.poll() is None:
-                    if self._is_port_in_use(server.port):
-                        print(f"[VIEW] Reusing existing server for {session_id} on port {server.port}")
+                if server.status in ('building', 'running'):
+                    if server.status == 'building':
+                        self._logger.info("Build already in progress for %s, reusing current build", session_id)
                         return server
+                    if server.process and server.process.poll() is None:
+                        if self._is_port_in_use(server.port):
+                            self._logger.info("Reusing existing server for %s on port %s", session_id, server.port)
+                            return server
                 # Clean up old state
                 await self._stop_server(session_id)
                 del self._servers[session_id]
@@ -298,7 +330,7 @@ class ViewManager:
             
             if not project_dir:
                 error_msg = f'No package.json found. Searched in: {working_directory}'
-                print(f"[VIEW] Error: {error_msg}")
+                self._logger.error("View start failed: %s", error_msg)
                 server = ViewServer(
                     session_id=session_id,
                     port=0,
@@ -311,87 +343,49 @@ class ViewManager:
                 self._servers[session_id] = server
                 return server
             
-            # Check if node_modules exists, if not run npm install first
-            node_modules = os.path.join(project_dir, "node_modules")
-            if not os.path.exists(node_modules):
-                print(f"[VIEW] Installing dependencies for {session_id}...")
-                try:
-                    install_process = await asyncio.create_subprocess_exec(
-                        "npm", "install",
-                        cwd=project_dir,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout, stderr = await asyncio.wait_for(install_process.communicate(), timeout=180)
-                    if install_process.returncode != 0:
-                        error_msg = f'npm install failed: {stderr.decode()[:300]}'
-                        print(f"[VIEW] {error_msg}")
-                        server = ViewServer(
-                            session_id=session_id,
-                            port=0,
-                            process=None,
-                            project_dir=project_dir,
-                            status='error',
-                            error=error_msg,
-                            candidates_found=candidates
-                        )
-                        self._servers[session_id] = server
-                        return server
-                except asyncio.TimeoutError:
-                    error_msg = 'npm install timed out (180s)'
-                    print(f"[VIEW] {error_msg}")
-                    server = ViewServer(
-                        session_id=session_id,
-                        port=0,
-                        process=None,
-                        project_dir=project_dir,
-                        status='error',
-                        error=error_msg,
-                        candidates_found=candidates
-                    )
-                    self._servers[session_id] = server
-                    return server
-                except Exception as e:
-                    error_msg = f'Failed to install dependencies: {str(e)}'
-                    print(f"[VIEW] {error_msg}")
-                    server = ViewServer(
-                        session_id=session_id,
-                        port=0,
-                        process=None,
-                        project_dir=project_dir,
-                        status='error',
-                        error=error_msg,
-                        candidates_found=candidates
-                    )
-                    self._servers[session_id] = server
-                    return server
-            
+            force_clean_build = session_id in self._force_clean_build
+            if force_clean_build:
+                self._force_clean_build.discard(session_id)
+
             # Allocate port
             port = self._find_available_port()
             self._used_ports.add(port)
             
-            # Build and serve
-            return await self._build_and_serve(session_id, working_directory, project_dir, port, candidates)
+            server = ViewServer(
+                session_id=session_id,
+                port=port,
+                process=None,
+                project_dir=project_dir,
+                status='building',
+                candidates_found=candidates
+            )
+            self._servers[session_id] = server
+        
+        # Build in background to keep API responsive
+        async def run_build():
+            try:
+                await self._build_and_serve(server, working_directory, project_dir, force_clean_build)
+            except Exception as e:
+                self._logger.error("Background build error for %s: %s", server.session_id, e)
+                server.status = 'error'
+                server.error = str(e)
+                self._used_ports.discard(server.port)
+        
+        asyncio.create_task(run_build())
+        return server
     
-    async def _import_session_flow(self, session_id: str, project_dir: str) -> None:
-        """Import flow.json from dist directory to Node-RED if it exists."""
-        # Check common dist locations for flow.json
-        flow_paths = [
-            os.path.join(project_dir, "dist", "flow.json"),
-            os.path.join(project_dir, "build", "flow.json"),
-            os.path.join(project_dir, "flow.json"),
-        ]
-        
-        flow_json_path = None
-        for path in flow_paths:
-            if os.path.exists(path):
-                flow_json_path = path
-                break
-        
+    async def _import_session_flow(
+        self,
+        session_id: str,
+        session_dir: str,
+        project_dir: str,
+        dist_dir: Optional[str]
+    ) -> None:
+        """Import flow.json into Node-RED if it exists."""
+        flow_json_path = self._find_flow_file(session_dir, project_dir, dist_dir)
         if not flow_json_path:
             print(f"[VIEW] No flow.json found for {session_id}")
             return
-        
         print(f"[VIEW] Found flow.json at {flow_json_path}, importing to Node-RED...")
         
         try:
@@ -407,34 +401,98 @@ class ViewManager:
     
     async def _build_and_serve(
         self,
-        session_id: str,
+        server: ViewServer,
         session_dir: str,
         project_dir: str,
-        port: int,
-        candidates: List[str]
-    ) -> ViewServer:
+        force_clean_build: bool,
+    ) -> None:
         """Build project and start a static server."""
-        server = ViewServer(
-            session_id=session_id,
-            port=port,
-            process=None,
-            project_dir=project_dir,
-            status='building',
-            candidates_found=candidates
-        )
-        self._servers[session_id] = server
-        
         try:
+            # Check if node_modules exists, if not run npm install first
+            node_modules = os.path.join(project_dir, "node_modules")
+            if not os.path.exists(node_modules):
+                self._logger.info("Installing dependencies for %s", server.session_id)
+                try:
+                    install_process = await asyncio.create_subprocess_exec(
+                        "npm", "install",
+                        cwd=project_dir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await asyncio.wait_for(install_process.communicate(), timeout=180)
+                    if install_process.returncode != 0:
+                        error_msg = f'npm install failed: {stderr.decode()[:300]}'
+                        self._logger.error("Install failed for %s: %s", server.session_id, error_msg)
+                        server.status = 'error'
+                        server.error = error_msg
+                        self._used_ports.discard(server.port)
+                        return
+                except asyncio.TimeoutError:
+                    error_msg = 'npm install timed out (180s)'
+                    self._logger.error("Install timed out for %s", server.session_id)
+                    server.status = 'error'
+                    server.error = error_msg
+                    self._used_ports.discard(server.port)
+                    return
+                except Exception as e:
+                    error_msg = f'Failed to install dependencies: {str(e)}'
+                    self._logger.error("Install failed for %s: %s", server.session_id, error_msg)
+                    server.status = 'error'
+                    server.error = error_msg
+                    self._used_ports.discard(server.port)
+                    return
+            
             dist_dir = None
+            # Preserve flow/UNS artifacts across builds (vite may wipe dist/)
+            prebuild_flow_content: str | None = None
+            prebuild_flow_path: str | None = None
+            prebuild_uns_content: str | None = None
+            prebuild_uns_name: str | None = None
+
+            prebuild_flow_candidates = [
+                os.path.join(project_dir, "dist", "flow.json"),
+                os.path.join(project_dir, "build", "flow.json"),
+                os.path.join(project_dir, "flow.json"),
+                os.path.join(session_dir, "flow.json"),
+                os.path.join(session_dir, "app", "flow.json"),
+            ]
+            for candidate in prebuild_flow_candidates:
+                if os.path.exists(candidate) and os.path.isfile(candidate):
+                    try:
+                        prebuild_flow_content = Path(candidate).read_text(encoding="utf-8")
+                        prebuild_flow_path = candidate
+                        break
+                    except Exception:
+                        pass
+
+            prebuild_uns_path = self._find_uns_file(session_dir)
+            if prebuild_uns_path and os.path.exists(prebuild_uns_path):
+                try:
+                    prebuild_uns_content = Path(prebuild_uns_path).read_text(encoding="utf-8")
+                    prebuild_uns_name = os.path.basename(prebuild_uns_path)
+                except Exception:
+                    prebuild_uns_content = None
+                    prebuild_uns_name = None
+
             # Check if we have a build script
             if self._has_build_script(project_dir):
+                if force_clean_build:
+                    for dir_name in ["dist", "build"]:
+                        dir_path = os.path.join(project_dir, dir_name)
+                        if os.path.exists(dir_path):
+                            try:
+                                shutil.rmtree(dir_path)
+                            except Exception as e:
+                                self._logger.warning("Failed to clean %s for %s: %s", dir_path, server.session_id, e)
+
                 max_retries = 3
                 last_error = ""
+                build_started = time.perf_counter()
                 
                 for attempt in range(max_retries):
                     # Clean dist directory before retry
                     if attempt > 0:
-                        print(f"[VIEW] Retry {attempt + 1}/{max_retries} for {session_id}...")
+                        self._logger.warning("Retry %s/%s for %s", attempt + 1, max_retries, server.session_id)
                         for dir_name in ["dist", "build"]:
                             dir_path = os.path.join(project_dir, dir_name)
                             if os.path.exists(dir_path):
@@ -444,7 +502,11 @@ class ViewManager:
                                     print(f"[VIEW] Failed to clean {dir_path}: {e}")
                         await asyncio.sleep(1)
                     
-                    print(f"[VIEW] Building project for {session_id}..." + (f" (attempt {attempt + 1})" if attempt > 0 else ""))
+                    self._logger.info(
+                        "Building project for %s%s",
+                        server.session_id,
+                        f" (attempt {attempt + 1})" if attempt > 0 else ""
+                    )
                     
                     build_process = await asyncio.create_subprocess_exec(
                         "npm", "run", "build", "--", "--base=./",
@@ -457,26 +519,35 @@ class ViewManager:
                         stdout, stderr = await asyncio.wait_for(build_process.communicate(), timeout=180)
                         
                         if build_process.returncode == 0:
-                            print(f"[VIEW] Build succeeded for {session_id}")
-                            # Try to import flow.json if it exists in dist
-                            await self._import_session_flow(session_id, project_dir)
+                            build_elapsed = time.perf_counter() - build_started
+                            self._logger.info("Build succeeded for %s", server.session_id)
+                            self._logger.info("Build duration for %s: %.2fs", server.session_id, build_elapsed)
                             break
                         else:
+                            build_elapsed = time.perf_counter() - build_started
                             last_error = stderr.decode()[:500]
-                            print(f"[VIEW] Build failed (attempt {attempt + 1}): {last_error[:100]}...")
+                            self._logger.error(
+                                "Build failed (attempt %s) for %s: %s",
+                                attempt + 1,
+                                server.session_id,
+                                last_error[:100]
+                            )
+                            self._logger.error("Build duration for %s: %.2fs", server.session_id, build_elapsed)
                             if attempt == max_retries - 1:
                                 server.status = 'error'
                                 server.error = f'Build failed after {max_retries} attempts: {last_error}'
-                                self._used_ports.discard(port)
-                                return server
+                                self._used_ports.discard(server.port)
+                                return
                     except asyncio.TimeoutError:
+                        build_elapsed = time.perf_counter() - build_started
                         last_error = 'Build timed out (180s)'
-                        print(f"[VIEW] {last_error}")
+                        self._logger.error("Build timed out for %s", server.session_id)
+                        self._logger.error("Build duration for %s: %.2fs", server.session_id, build_elapsed)
                         if attempt == max_retries - 1:
                             server.status = 'error'
                             server.error = last_error
-                            self._used_ports.discard(port)
-                            return server
+                            self._used_ports.discard(server.port)
+                            return
                 
                 # Find dist directory
                 dist_dir = os.path.join(project_dir, "dist")
@@ -490,31 +561,43 @@ class ViewManager:
                     else:
                         server.status = 'error'
                         server.error = 'Build completed but dist/build directory not found'
-                        self._used_ports.discard(port)
-                        return server
+                        self._used_ports.discard(server.port)
+                        return
                 
+                # Restore flow/UNS artifacts if they were present before build
+                if dist_dir and os.path.exists(dist_dir):
+                    try:
+                        if prebuild_flow_content:
+                            (Path(dist_dir) / "flow.json").write_text(prebuild_flow_content, encoding="utf-8")
+                        else:
+                            flow_src = prebuild_flow_path or self._find_flow_file(session_dir, project_dir, None)
+                            if flow_src and os.path.exists(flow_src):
+                                shutil.copy2(flow_src, os.path.join(dist_dir, "flow.json"))
+                    except Exception as e:
+                        self._logger.warning("Failed to restore flow.json for %s: %s", server.session_id, e)
+
+                    try:
+                        if prebuild_uns_content and prebuild_uns_name:
+                            (Path(dist_dir) / prebuild_uns_name).write_text(prebuild_uns_content, encoding="utf-8")
+                        else:
+                            uns_src = self._find_uns_file(session_dir)
+                            if uns_src and os.path.exists(uns_src):
+                                shutil.copy2(uns_src, os.path.join(dist_dir, os.path.basename(uns_src)))
+                    except Exception as e:
+                        self._logger.warning("Failed to restore UNS.json for %s: %s", server.session_id, e)
+
+                await self._import_session_flow(server.session_id, session_dir, project_dir, dist_dir)
+
                 serve_dir = dist_dir
             else:
                 # No build script, serve the project directory directly (static site)
-                print(f"[VIEW] No build script, serving directory directly: {project_dir}")
+                self._logger.info("No build script, serving directory directly: %s", project_dir)
                 serve_dir = project_dir
 
-            # Create build package (non-fatal if it fails)
-            package_path, package_error = self._create_build_package(
-                session_id,
-                session_dir,
-                project_dir,
-                dist_dir if self._has_build_script(project_dir) else None
-            )
-            if package_error:
-                print(f"[VIEW] Package creation failed: {package_error}")
-            server.package_path = package_path
-            server.package_error = package_error
-            
             # Start static server using npx serve
-            print(f"[VIEW] Starting static server for {session_id} on port {port}")
+            self._logger.info("Starting static server for %s on port %s", server.session_id, server.port)
             process = subprocess.Popen(
-                ["npx", "serve", "-s", serve_dir, "-l", str(port), "--cors", "--no-clipboard"],
+                ["npx", "serve", "-s", serve_dir, "-l", str(server.port), "--cors", "--no-clipboard"],
                 cwd=project_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -524,11 +607,11 @@ class ViewManager:
             server.process = process
             
             # Wait for server to start
-            port_ready = await self._verify_port_listening(port, timeout=15.0)
+            port_ready = await self._verify_port_listening(server.port, timeout=15.0)
             
             if process.poll() is None and port_ready:
                 server.status = 'running'
-                print(f"[VIEW] Server started for {session_id} on port {port}")
+                self._logger.info("Server started for %s on port %s", server.session_id, server.port)
             else:
                 stderr_output = ""
                 if process.poll() is not None:
@@ -538,17 +621,37 @@ class ViewManager:
                         pass
                 server.status = 'error'
                 server.error = f'Static server failed to start. {stderr_output}'
-                self._used_ports.discard(port)
-                print(f"[VIEW] Server failed to start: {server.error}")
+                self._used_ports.discard(server.port)
+                self._logger.error("Server failed to start for %s: %s", server.session_id, server.error)
             
-            return server
+            # Create build package in background (non-blocking)
+            async def create_package():
+                try:
+                    package_path, package_error = await asyncio.to_thread(
+                        self._create_build_package,
+                        server.session_id,
+                        session_dir,
+                        project_dir,
+                        dist_dir if self._has_build_script(project_dir) else None
+                    )
+                    if package_error:
+                        self._logger.error("Package creation failed for %s: %s", server.session_id, package_error)
+                    server.package_path = package_path
+                    server.package_error = package_error
+                    async with self._lock:
+                        self._cache_package(server.session_id, project_dir, package_path, package_error)
+                except Exception as e:
+                    server.package_error = f"Failed to create package: {e}"
+                    self._logger.error("Package creation failed for %s: %s", server.session_id, e)
+
+            asyncio.create_task(create_package())
             
         except Exception as e:
-            self._used_ports.discard(port)
+            self._used_ports.discard(server.port)
             server.status = 'error'
             server.error = str(e)
-            print(f"[VIEW] Exception: {e}")
-            return server
+            self._logger.error("View build exception for %s: %s", server.session_id, e)
+            return
     
     async def _stop_server(self, session_id: str) -> bool:
         """Internal method to stop a server (assumes lock is held)."""
@@ -580,12 +683,26 @@ class ViewManager:
             result = await self._stop_server(session_id)
             if session_id in self._servers:
                 del self._servers[session_id]
+            self._force_clean_build.add(session_id)
             return result
     
     async def get_status(self, session_id: str) -> Optional[dict]:
         """Get the status of a view server."""
         async with self._lock:
             if session_id not in self._servers:
+                cached = self._package_cache.get(session_id)
+                if cached and cached.get("package_path"):
+                    return {
+                        'session_id': session_id,
+                        'port': None,
+                        'url': None,
+                        'project_dir': cached.get("project_dir"),
+                        'status': 'not_started',
+                        'error': None,
+                        'candidates_found': [],
+                        'package_ready': True,
+                        'package_error': cached.get("package_error"),
+                    }
                 return None
             
             server = self._servers[session_id]
@@ -601,6 +718,10 @@ class ViewManager:
                 server.error = 'Server stopped unexpectedly'
                 self._used_ports.discard(server.port)
             
+            # Recover from stale "building" state if port is live
+            if server.status == 'building' and self._is_port_in_use(server.port):
+                server.status = 'running'
+            
             return {
                 'session_id': server.session_id,
                 'port': server.port,
@@ -612,6 +733,24 @@ class ViewManager:
                 'package_ready': bool(server.package_path and os.path.exists(server.package_path)),
                 'package_error': server.package_error
             }
+
+    async def prepare_artifacts(self, session_id: str, session_dir: str) -> tuple[Optional[str], Optional[str]]:
+        """Create a build package and cache it for download."""
+        project_dir, _ = self._find_project_dir(session_dir)
+        if not project_dir:
+            return None, "No project directory found"
+
+        dist_dir = self._find_build_output_dir(project_dir)
+        package_path, package_error = await asyncio.to_thread(
+            self._create_build_package,
+            session_id,
+            session_dir,
+            project_dir,
+            dist_dir
+        )
+        async with self._lock:
+            self._cache_package(session_id, project_dir, package_path, package_error)
+        return package_path, package_error
 
     async def get_or_create_package(self, session_id: str, session_dir: str) -> Optional[str]:
         """Get existing package path or create one if build output exists."""
@@ -636,6 +775,7 @@ class ViewManager:
             if server:
                 server.package_path = package_path
                 server.package_error = package_error
+            self._cache_package(session_id, project_dir, package_path, package_error)
 
         return package_path
     

@@ -1,150 +1,146 @@
 # Tier0 Appbuilder
 
-基于 Claude Agent SDK 的 AI 应用构建器，支持多 Session、流式响应、实时预览。
+基于 Claude Agent SDK 的多会话应用构建平台，前后端一体化，支持流式对话、Preview/Production 构建、UNS/Flow 可视化与系统资源监控。
 
 ## 特性
+- 多 Session：独立工作目录、历史与产物隔离
+- 流式响应：SSE 实时输出，工具调用可视化
+- Preview/Production：开发预览 + 构建预览
+- Flow 集成：共享 Node-RED，自动导入 `flow.json`
+- UNS 视图：展示 `UNS.json` 的树形结构
+- SQLite 持久化：会话与消息可恢复
+- `/status` 子页面：系统与会话资源状态
 
-- **多模型支持**: Claude Opus 4.5/4、Sonnet 4.5/4、Haiku 4.5
-- **流式响应**: SSE 实时输出，思考过程可视化，工具调用状态展示
-- **多 Session**: 独立工作目录，隔离的对话历史
-- **实时预览**: Preview (HMR 热更新) 和 Production (构建模式) 两种预览方式
-- **Flow 编排**: 共享 Node-RED 实例，自动导入 Session 的 flow.json
-- **UNS 视图**: Appbuilder View 内展示 UNS.json 的树形结构与 Schema
-- **SQLite 持久化**: 会话和消息持久化，重启不丢失
-- **国际化**: 中英文切换
-- **错误恢复**: API 重试、错误边界、断线恢复
-
-## 架构设计
-
-### 组件分层
-
-- **前端 (React + Vite + Shadcn)**: 会话管理、聊天 UI、流式输出与工具调用可视化、View/Flow 嵌入。
-- **后端 (FastAPI)**: API、SSE、WebSocket 代理、会话管理、Preview/View/Flow 进程编排。
-- **Agent 执行器 (Claude Agent SDK)**: 在 Session 目录内执行工具与文件操作，支持流式输出与权限回调。
-- **Session 存储 (SQLite + 文件系统)**: `.sessions/` 保存工作目录与 `sessions.db`，支持重启恢复。
-- **Flow 服务 (Node-RED)**: 共享实例，`/flow` 下的编辑器与 API 统一代理。
-
-### 数据与控制流
-
-1. 前端通过 `POST /sessions` 创建会话，后端生成独立工作目录。
-2. 聊天请求走 `/sessions/{id}/chat/stream`（SSE），由 Agent 执行器调用 Claude SDK。
-3. 会话状态与消息写入 `.sessions/sessions.db`，工作产物写入会话目录。
-4. 若检测到 Web 项目，后端可启动 Preview/View，并通过 `/preview/{id}`、`/view/{id}` 统一代理访问。
-5. 若存在 `flow.json`，自动导入共享 Node-RED，并通过 `/flow/*` 访问编辑器与 API。
+## 架构一览
+```mermaid
+flowchart TD
+  user[User] --> ui[ReactUI]
+  ui -->|/api| api[FastAPI]
+  api --> sessionMgr[SessionManager]
+  api --> agentExec[AgentExecutor]
+  api --> previewMgr[PreviewManager]
+  api --> viewMgr[ViewManager]
+  api --> flowMgr[FlowManager]
+  previewMgr --> vite[ViteDevServer]
+  viewMgr --> staticSrv[StaticServe]
+  flowMgr --> nodeRed[NodeRed]
+  ui -->|/preview| vite
+  ui -->|/view| staticSrv
+  ui -->|/flow| nodeRed
+```
 
 ## 快速开始
 
-### 生产模式（推荐）
+### 运行前要求
+- 必须使用**非 root 的高权限用户**启动（具备 sudo 权限即可）
+- 已完成 `claude` CLI 登录
+- Python 依赖管理使用 `uv`
 
+### 生产模式（推荐）
 ```bash
-# 安装依赖
+# 后端依赖
 uv sync
-npm install                                      # Node-RED 本地安装
+
+# Node-RED 依赖
+npm install
+
+# 前端构建
 cd frontend && npm install && npm run build && cd ..
 
-# 启动服务（需要非 root 用户以启用 bypassPermissions）
-sudo -u appbuilder .venv/bin/python -m uvicorn src.agent_backend.main:app --host 0.0.0.0 --port 8000
+# 启动服务
+uv run uvicorn src.agent_backend.main:app --host 0.0.0.0 --port 8000
 ```
-
 访问 http://localhost:8000
 
 ### 开发模式
-
 ```bash
-# 后端
+# 后端（必须非 root 的高权限用户）
 uv run uvicorn src.agent_backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 前端（另一个终端）
-cd frontend && npm run dev
+cd frontend && npm install && npm run dev
 ```
-
 开发模式访问 http://localhost:5173
 
-## 端口
+## E2E 测试（Playwright）
+前提：服务已启动（至少前端），建议同时启动后端与 Node-RED 以覆盖完整链路。
+```bash
+cd frontend
+npm run test:e2e
+```
+可选环境变量：
+- `E2E_BASE_URL`：覆盖测试访问地址（默认 `http://localhost:5173`）
+- `E2E_SKIP_BACKEND=1`：跳过依赖后端的动作（仅验证前端 UI）
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| API + 前端 | 8000 | FastAPI，同时服务静态前端和 API |
-| Preview | 5001-5100 | 动态分配，Vite Dev Server (HMR 热更新) |
-| Production View | 4001-4100 | 动态分配，构建后的静态文件预览 |
-| Flow | 1880 | 共享 Node-RED 实例（通过 `/flow/*` 代理） |
+## 端口与路由
+- API + 前端：`8000`
+- Preview（dev/HMR）：`5001-5100`
+- Production View：`4001-4100`
+- Flow（Node-RED）：`1880`
 
-## 网络结构
-
-所有外部访问统一走 `:8000`，后端在同端口代理内部服务，便于公网穿透与域名接入。
-
+统一入口（8000）反向代理：
 ```
 Browser
   └─ HTTP(S) :8000
-      ├─ /api/*, /sessions/* → FastAPI (会话/聊天/SSE)
-      ├─ /preview/{session_id}/* → Vite Dev Server :5001-5100 (HMR wss)
-      ├─ /view/{session_id}/* → Build 静态服务器 :4001-4100
-      └─ /flow/* → Node-RED :1880 (编辑器 + /flow/api)
+      ├─ /api/*, /sessions/* → FastAPI
+      ├─ /preview/{session_id}/* → Vite Dev Server
+      ├─ /view/{session_id}/* → 静态构建服务
+      └─ /flow/* → Node-RED
 ```
 
-要点说明：
-- **HMR**: Preview 会注入 `VITE_BASE=/preview/{session_id}/`，前端通过 `wss` 与 HMR 通道通信。
-- **代理路径**: `/preview/{id}`、`/view/{id}`、`/flow/*` 均由后端反向代理到本地端口。
+## /status 页面
+- 访问 `/status` 查看系统与各 Session 资源占用
+- 数据来源：`GET /system/status`
 
-## 公网访问（Tunnel）
+## 配置与路径
+### Node-RED
+- 数据目录：`.nodered/`
+- Admin 根路径：`/flow`
+- HTTP Node 根路径：`/flow/api`
 
-只需穿透 **8000 端口**。后端会：
-- 直接服务前端静态文件
-- 处理 `/api/*` 请求
-- 代理 `/view/{session_id}/*` 到对应 View 服务器
-- 代理 `/flow/*` 到共享 Node-RED 实例
+### Session 与存储
+- 工作目录：`.sessions/{session_id}/`
+- 数据库：`.sessions/sessions.db`
+- 自动复制：`claude.md` 与本地 skills/plugins
 
-## API
+### Flow/UNS 文件定位
+- `flow.json`：`dist/flow.json`、`build/flow.json`、`flow.json`、`app/flow.json`、`public/flow.json`
+- `UNS.json`：`app/uns.json`、`uns.json`（大小写不敏感，找不到会递归搜索）
 
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| POST | `/sessions` | 创建 Session |
-| GET | `/sessions` | 列出 Sessions |
-| DELETE | `/sessions/{id}?delete=true` | 删除 Session |
-| POST | `/sessions/{id}/chat/stream` | 发送消息（流式）|
-| GET | `/sessions/{id}/history` | 获取历史 |
-| POST | `/sessions/{id}/preview/start` | 启动 Preview (Dev Server + HMR) |
-| POST | `/sessions/{id}/preview/stop` | 停止 Preview |
-| GET | `/sessions/{id}/preview/status` | Preview 状态 |
-| GET | `/preview/{id}/*` | Preview 代理 (HTTP + WebSocket) |
-| POST | `/sessions/{id}/view/start` | 构建并启动 Production View |
-| POST | `/sessions/{id}/view/stop` | 停止 Production View |
-| GET | `/sessions/{id}/view/status` | Production View 状态 |
-| GET | `/view/{id}/*` | Production View 代理 |
-| GET | `/sessions/{id}/uns` | 获取 UNS.json |
-| POST | `/flow/start` | 启动共享 Node-RED |
-| GET | `/flow/status` | Flow 状态 |
-| GET | `/flow/*` | Flow 代理 |
+### 环境变量
+- `APPBUILDER_LOG_LEVEL`：后端日志级别（默认 `INFO`）
+- `APPBUILDER_HMR_HOST`：Preview HMR Host（默认 `localhost`）
+- `APPBUILDER_HMR_CLIENT_PORT`：Preview HMR 端口（默认 `8000`）
+- `VITE_BASE`：前端基础路径（Preview 自动设为 `/preview/{session_id}/`）
+- `VITE_HMR_HOST` / `VITE_HMR_PROTOCOL` / `VITE_HMR_CLIENT_PORT`：HMR 配置（后端自动注入）
+
+## 主要 API
+- `POST /sessions`：创建 Session
+- `GET /sessions`：列出 Sessions
+- `GET /sessions/{id}`：获取 Session
+- `DELETE /sessions/{id}?delete=true`：删除 Session
+- `POST /sessions/{id}/chat/stream`：SSE 流式对话
+- `GET /sessions/{id}/history`：获取历史
+- `POST /sessions/{id}/preview/start`：启动 Preview
+- `POST /sessions/{id}/view/start`：构建并启动 Production View
+- `GET /sessions/{id}/view/package`：下载构建包
+- `POST /sessions/{id}/flow/start`：启动 Flow 并导入 flow.json
+- `GET /sessions/{id}/uns`：获取 UNS.json
+- `GET /system/status`：系统资源状态
 
 ## 项目结构
-
 ```
-├── src/agent_backend/    # 后端 (FastAPI)
-│   ├── main.py           # 入口 + 路由
-│   ├── session.py        # Session 管理 + SQLite
-│   ├── agent.py          # Claude Agent 执行器
-│   ├── preview.py        # Preview 服务器管理 (Dev + HMR)
-│   ├── view.py           # View 服务器管理 (Production)
-│   ├── flow.py           # Node-RED Flow 管理
-│   └── permissions.py    # 权限管理
-├── frontend/             # 前端 (React + Vite + Shadcn)
-│   ├── src/
-│   │   ├── components/   # UI 组件
-│   │   ├── hooks/        # 自定义 Hooks
-│   │   └── lib/          # 工具函数
-│   └── dist/             # 构建产物
-├── node_modules/         # Node-RED 本地安装
-├── .nodered/             # Node-RED 数据目录 (flows, settings)
-├── .sessions/            # Session 工作目录 (自动创建)
+├── src/agent_backend/    # FastAPI 后端
+├── frontend/             # React 前端
+├── .sessions/            # Session 工作目录与数据库
+├── .nodered/             # Node-RED 数据目录
 ├── package.json          # Node-RED 依赖
 └── claude.md             # Agent 构建指南
 ```
 
 ## 注意事项
-
-- **非 root 用户**: Claude Agent SDK 的 `bypassPermissions` 模式要求非 root 用户运行
-- **首次使用**: 需要先完成 `claude` CLI 登录认证
+- 必须使用非 root 的高权限用户运行
+- 首次使用需要 `claude` CLI 登录
 
 ## License
-
 MIT

@@ -959,6 +959,14 @@ export function ChatPanel({
   const [wizardData, setWizardData] = useState<WizardData>(initialWizardData);
   const [wizardDismissed, setWizardDismissed] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const scrollViewportRef = useRef<HTMLElement | null>(null);
+
+  const getScrollViewport = (): HTMLElement | null => {
+    const scrollArea = scrollAreaRef.current;
+    if (!scrollArea) return null;
+    return scrollArea.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+  };
 
   useEffect(() => {
     if (!session?.session_id) return;
@@ -974,14 +982,33 @@ export function ChatPanel({
   }, [messages.length]);
 
   useEffect(() => {
-    // Auto scroll to bottom
-    const scrollArea = scrollAreaRef.current;
-    if (scrollArea) {
-      const scrollContainer = scrollArea.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-    }
+    const viewport = getScrollViewport();
+    if (!viewport) return;
+
+    scrollViewportRef.current = viewport;
+    const threshold = 48;
+
+    const handleScroll = () => {
+      const atBottom =
+        viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - threshold;
+      shouldAutoScrollRef.current = atBottom;
+    };
+
+    viewport.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+
+    return () => {
+      viewport.removeEventListener('scroll', handleScroll);
+    };
+  }, [session?.session_id]);
+
+  useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+    const viewport = scrollViewportRef.current || getScrollViewport();
+    if (!viewport) return;
+    requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight;
+    });
   }, [messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -989,6 +1016,7 @@ export function ChatPanel({
     if (!input.trim() || loading || streaming) return;
 
     const message = input.trim();
+    shouldAutoScrollRef.current = true;
     setInput('');
     setWizardDismissed(true);
     setWizardStep(0);
@@ -1112,6 +1140,7 @@ export function ChatPanel({
                 variant={showView && viewPanelTab === 'preview' ? 'default' : 'outline'}
                 size="sm"
                 onClick={onToggleView}
+                data-testid="toggle-view"
                 className="h-10 px-6 min-w-[140px] text-sm font-bold btn-glow bg-primary/90 hover:bg-primary text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50 transition-transform hover:scale-105"
               >
                 {locale === 'zh'
@@ -1248,6 +1277,7 @@ export function ChatPanel({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t('inputPlaceholder')}
+              data-testid="chat-input"
               className="min-h-[40px] sm:min-h-[48px] max-h-[80px] sm:max-h-[100px] resize-none rounded-xl border-border/50 bg-background/80 focus:bg-background transition-all duration-300 input-glow text-sm"
               disabled={loading || streaming || session.status === 'closed'}
             />
@@ -1258,6 +1288,7 @@ export function ChatPanel({
                   variant="outline"
                   size="sm"
                   onClick={stopStreaming}
+                  data-testid="chat-stop"
                   className="rounded-xl h-9 px-3 btn-glow"
                 >
                   {t('stop')}
@@ -1267,6 +1298,7 @@ export function ChatPanel({
                   type="submit"
                   size="sm"
                   disabled={!input.trim() || loading || session.status === 'closed'}
+                  data-testid="chat-send"
                   className="rounded-xl h-9 px-4 btn-glow"
                 >
                   {t('send')}

@@ -8,6 +8,7 @@ import type {
   HistoryResponse,
   StreamChunk,
   UnsData,
+  SystemStatusResponse,
 } from '@/types';
 
 const API_BASE = '/api';
@@ -222,6 +223,10 @@ export const api = {
     return fetchApi('/health');
   },
 
+  async getSystemStatus(): Promise<SystemStatusResponse> {
+    return fetchApi<SystemStatusResponse>('/system/status');
+  },
+
   // Permissions
   async getPendingPermissions(sessionId: string): Promise<PendingPermissionsResponse> {
     return fetchApi<PendingPermissionsResponse>(`/sessions/${sessionId}/permissions`);
@@ -278,8 +283,9 @@ export const api = {
   },
 
   // Flow (shared Node-RED)
-  async startFlow(): Promise<FlowStatus> {
-    return fetchApi<FlowStatus>(`/flow/start`, {
+  async startFlow(sessionId?: string | null): Promise<FlowStatus> {
+    const endpoint = sessionId ? `/sessions/${sessionId}/flow/start` : `/flow/start`;
+    return fetchApi<FlowStatus>(endpoint, {
       method: 'POST',
     });
   },

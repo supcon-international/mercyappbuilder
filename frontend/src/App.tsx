@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { SessionList } from '@/components/SessionList';
 import { ChatPanel } from '@/components/ChatPanel';
 import { ViewPanel } from '@/components/ViewPanel';
+import { StatusPage } from '@/components/StatusPage';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/contexts/I18nContext';
@@ -10,6 +11,9 @@ import { api } from '@/lib/api';
 import type { Session } from '@/types';
 
 function App() {
+  if (window.location.pathname === '/status') {
+    return <StatusPage />;
+  }
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [selectedComponentContext, setSelectedComponentContext] = useState<string | null>(null);
   const [showView, setShowView] = useState(false);

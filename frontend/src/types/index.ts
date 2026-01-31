@@ -96,3 +96,31 @@ export interface UnsData {
   site?: string;
   topics: UnsTopic[];
 }
+
+export interface SessionResourceUsage {
+  session_id: string;
+  display_name?: string | null;
+  status: 'active' | 'idle' | 'busy' | 'closed';
+  cpu_percent: number;
+  memory_percent: number;
+  memory_bytes: number;
+  disk_percent: number;
+  disk_bytes: number;
+  process_count: number;
+}
+
+export interface TotalResourceUsage {
+  cpu_percent: number;
+  memory_percent: number;
+  memory_used_bytes: number;
+  memory_total_bytes: number;
+  disk_percent: number;
+  disk_used_bytes: number;
+  disk_total_bytes: number;
+}
+
+export interface SystemStatusResponse {
+  timestamp: string;
+  total: TotalResourceUsage;
+  sessions: SessionResourceUsage[];
+}

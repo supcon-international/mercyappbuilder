@@ -1,8 +1,13 @@
 """FastAPI application for the Claude Agent backend."""
 
 import asyncio
+import logging
 import json
+import time
 import os
+import shutil
+import hashlib
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -29,10 +34,20 @@ from .view import get_view_manager, ViewManager
 from .flow import get_flow_manager
 from .preview import get_preview_manager
 
+def _configure_logging() -> None:
+    log_level = os.environ.get("APPBUILDER_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
 # Port configuration
 API_PORT = 8000
 PREVIEW_PORT_START = 4001
 PREVIEW_PORT_END = 4100
+DEFAULT_HMR_HOST = os.environ.get("APPBUILDER_HMR_HOST", "localhost")
+DEFAULT_HMR_CLIENT_PORT = int(os.environ.get("APPBUILDER_HMR_CLIENT_PORT", "8000"))
 
 # Static files directory (built frontend)
 FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -44,11 +59,16 @@ session_manager: SessionManager | None = None
 # Global HTTP client for proxying (reuses connections)
 proxy_client: httpx.AsyncClient | None = None
 
+# Track flow/UNS hashes to detect changes per session
+last_flow_hash: dict[str, str] = {}
+last_uns_hash: dict[str, str] = {}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     global session_manager, proxy_client
+    _configure_logging()
     session_manager = SessionManager()
     proxy_client = httpx.AsyncClient(timeout=60.0, limits=httpx.Limits(max_connections=100))
     
@@ -120,9 +140,9 @@ async def _auto_start_preview_and_flow(session_id: str):
         
         session_dir = session.working_directory
         
-        # Check if there's a web project (has package.json)
-        package_json_path = os.path.join(session_dir, "package.json")
-        if not os.path.exists(package_json_path):
+        view_mgr = get_view_manager()
+        project_dir, _ = view_mgr._find_project_dir(session_dir)
+        if not project_dir:
             return  # Not a web project, skip
         
         print(f"[AUTO] Detected web project in session {session_id}")
@@ -137,14 +157,17 @@ async def _auto_start_preview_and_flow(session_id: str):
                 await preview_mgr.start_preview(
                     session_id=session_id,
                     session_dir=session_dir,
-                    hmr_host="appbuilder.m3rcyzzz.club",  # Default HMR host
-                    hmr_client_port=443
+                    hmr_host=DEFAULT_HMR_HOST,
+                    hmr_client_port=DEFAULT_HMR_CLIENT_PORT
                 )
                 print(f"[AUTO] Preview server started for {session_id}")
             except Exception as e:
                 print(f"[AUTO] Failed to start preview: {e}")
         
         await _import_flow_json(session_id, session_dir, context="AUTO")
+
+        await view_mgr.prepare_artifacts(session_id, session_dir)
+        await _refresh_flow_and_uns_if_changed(session_id, session_dir, context="AUTO")
     except Exception as e:
         print(f"[AUTO] Error in auto-start: {e}")
 
@@ -154,12 +177,179 @@ def _find_flow_json(session_dir: str) -> str | None:
         os.path.join(session_dir, "dist", "flow.json"),
         os.path.join(session_dir, "build", "flow.json"),
         os.path.join(session_dir, "flow.json"),
+        os.path.join(session_dir, "app", "flow.json"),
         os.path.join(session_dir, "public", "flow.json"),
     ]
     for path in flow_paths:
         if os.path.exists(path):
             return path
     return None
+
+
+def _find_uns_json(session_dir: str) -> str | None:
+    candidates = [
+        os.path.join(session_dir, "app", "uns.json"),
+        os.path.join(session_dir, "app", "UNS.json"),
+        os.path.join(session_dir, "uns.json"),
+        os.path.join(session_dir, "UNS.json"),
+        os.path.join(session_dir, "dist", "uns.json"),
+        os.path.join(session_dir, "dist", "UNS.json"),
+        os.path.join(session_dir, "build", "uns.json"),
+        os.path.join(session_dir, "build", "UNS.json"),
+    ]
+    for path in candidates:
+        if os.path.exists(path) and os.path.isfile(path):
+            return path
+    # Fallback: shallowest match in session dir
+    matches: list[tuple[int, str]] = []
+    for root, _, files in os.walk(session_dir):
+        for name in files:
+            if name.lower() == "uns.json":
+                path = os.path.join(root, name)
+                rel_depth = len(os.path.relpath(path, session_dir).split(os.sep))
+                matches.append((rel_depth, path))
+    if matches:
+        matches.sort(key=lambda item: item[0])
+        return matches[0][1]
+    return None
+
+
+def _file_sha256(path: str) -> str | None:
+    try:
+        hasher = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
+
+async def _refresh_flow_and_uns_if_changed(session_id: str, session_dir: str, context: str) -> None:
+    flow_path = _find_flow_json(session_dir)
+    if flow_path:
+        current_hash = _file_sha256(flow_path)
+        if current_hash and last_flow_hash.get(session_id) != current_hash:
+            print(f"[{context}] flow.json changed, re-importing...")
+            await _import_flow_json(session_id, session_dir, context=context)
+            last_flow_hash[session_id] = current_hash
+    uns_path = _find_uns_json(session_dir)
+    if uns_path:
+        current_hash = _file_sha256(uns_path)
+        if current_hash and last_uns_hash.get(session_id) != current_hash:
+            print(f"[{context}] UNS.json changed, refreshing artifacts...")
+            view_mgr = get_view_manager()
+            await view_mgr.prepare_artifacts(session_id, session_dir)
+            last_uns_hash[session_id] = current_hash
+
+
+def _read_proc_stat() -> tuple[int, int]:
+    try:
+        with open("/proc/stat", "r", encoding="utf-8") as f:
+            line = f.readline()
+        parts = line.split()
+        if len(parts) < 5 or parts[0] != "cpu":
+            return 0, 0
+        values = [int(p) for p in parts[1:]]
+        total = sum(values)
+        idle = values[3] + (values[4] if len(values) > 4 else 0)
+        return total, idle
+    except Exception:
+        return 0, 0
+
+
+def _read_meminfo() -> tuple[int, int]:
+    total_kb = 0
+    available_kb = 0
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    total_kb = int(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    available_kb = int(line.split()[1])
+                if total_kb and available_kb:
+                    break
+    except Exception:
+        return 0, 0
+    return total_kb * 1024, available_kb * 1024
+
+
+def _read_proc_ticks(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as f:
+            stat = f.read()
+        end = stat.rfind(")")
+        if end == -1:
+            return None
+        parts = stat[end + 2 :].split()
+        if len(parts) < 15:
+            return None
+        utime = int(parts[11])
+        stime = int(parts[12])
+        return utime + stime
+    except Exception:
+        return None
+
+
+def _read_proc_rss(pid: int) -> int:
+    try:
+        with open(f"/proc/{pid}/statm", "r", encoding="utf-8") as f:
+            parts = f.read().split()
+        if len(parts) < 2:
+            return 0
+        rss_pages = int(parts[1])
+        return rss_pages * os.sysconf("SC_PAGE_SIZE")
+    except Exception:
+        return 0
+
+
+def _match_session_id(cwd: str, session_paths: list[tuple[str, str]]) -> str | None:
+    for session_id, session_path in session_paths:
+        if cwd == session_path or cwd.startswith(session_path + os.sep):
+            return session_id
+    return None
+
+
+def _collect_session_processes(session_paths: list[tuple[str, str]]) -> dict[int, dict[str, int | str]]:
+    results: dict[int, dict[str, int | str]] = {}
+    try:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            try:
+                cwd = os.readlink(f"/proc/{pid}/cwd")
+            except Exception:
+                continue
+            session_id = _match_session_id(cwd, session_paths)
+            if not session_id:
+                continue
+            ticks = _read_proc_ticks(pid)
+            if ticks is None:
+                continue
+            rss = _read_proc_rss(pid)
+            results[pid] = {"session_id": session_id, "ticks": ticks, "rss": rss}
+    except Exception:
+        return results
+    return results
+
+
+def _get_dir_size(path: str) -> int:
+    if not os.path.exists(path):
+        return 0
+    total = 0
+    for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            if name.startswith("."):
+                continue
+            file_path = os.path.join(root, name)
+            try:
+                total += os.path.getsize(file_path)
+            except Exception:
+                pass
+    return total
 
 
 async def _import_flow_json(session_id: str, session_dir: str, context: str) -> None:
@@ -184,6 +374,46 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Request logging middleware
+@app.middleware("http")
+async def log_http_requests(request: Request, call_next):
+    start = time.perf_counter()
+    logger = logging.getLogger("appbuilder.http")
+    session_id = None
+    if request.url.path.startswith("/sessions/"):
+        parts = request.url.path.split("/")
+        if len(parts) > 2:
+            session_id = parts[2]
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.error(
+            "request_failed method=%s path=%s session=%s duration_ms=%.1f",
+            request.method,
+            request.url.path,
+            session_id,
+            duration_ms,
+        )
+        raise
+    duration_ms = (time.perf_counter() - start) * 1000
+    status = response.status_code
+    if status >= 500:
+        log_fn = logger.error
+    elif status >= 400:
+        log_fn = logger.warning
+    else:
+        log_fn = logger.info
+    log_fn(
+        "request_completed method=%s path=%s status=%s session=%s duration_ms=%.1f",
+        request.method,
+        request.url.path,
+        status,
+        session_id,
+        duration_ms,
+    )
+    return response
 
 # CORS middleware for web clients
 app.add_middleware(
@@ -389,6 +619,7 @@ async def send_message(session_id: str, request: SendMessageRequest) -> AgentRes
         response = await executor.execute(message)
         # Save session state after message
         await manager.save_session(session_id)
+        asyncio.create_task(_refresh_flow_and_uns_if_changed(session_id, session.working_directory, context="CHAT"))
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -433,9 +664,10 @@ async def send_message_stream(session_id: str, request: SendMessageRequest):
                 yield f"data: {json.dumps(chunk)}\n\n"
             # Save session state after streaming completes
             await manager.save_session(session_id)
-            
-            # Auto-start preview and import flow after conversation completes
+
+            # Auto-start preview and refresh flow/UNS after conversation completes
             asyncio.create_task(_auto_start_preview_and_flow(session_id))
+            asyncio.create_task(_refresh_flow_and_uns_if_changed(session_id, session.working_directory, context="STREAM"))
         except asyncio.CancelledError:
             # Client disconnected - the executor should still save the message
             print(f"[STREAM] Client disconnected for session {session_id}")
@@ -789,11 +1021,11 @@ async def start_preview(session_id: str, request: Request) -> dict:
     # Check for Cloudflare headers that indicate tunnel access
     is_cloudflare = request.headers.get('cf-ray') is not None or request.headers.get('cf-connecting-ip') is not None
     if is_cloudflare and hmr_host in ('localhost', '127.0.0.1'):
-        hmr_host = 'appbuilder.m3rcyzzz.club'
+        hmr_host = DEFAULT_HMR_HOST
     
     # Use 443 for HTTPS/tunnel, otherwise use the request port
     is_https = is_cloudflare or request.url.scheme == 'https' or 'appbuilder' in hmr_host or request.headers.get('x-forwarded-proto') == 'https'
-    hmr_client_port = 443 if is_https else 8000
+    hmr_client_port = 443 if is_https else DEFAULT_HMR_CLIENT_PORT
     
     preview_mgr = get_preview_manager()
     server = await preview_mgr.start_preview(
@@ -1062,6 +1294,32 @@ async def start_flow() -> dict:
     }
 
 
+@app.post("/sessions/{session_id}/flow/start", tags=["Flow"])
+async def start_flow_for_session(session_id: str) -> dict:
+    """Start the shared Node-RED server and import session flow.json."""
+    manager = get_session_manager()
+    session = await manager.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    flow_mgr = get_flow_manager()
+    server = await flow_mgr.start_flow()
+
+    if server.status == "running":
+        await _import_flow_json(session_id, session.working_directory, context="SESSION")
+
+    proxy_url = "/flow/" if server.status == "running" else None
+    return {
+        "status": server.status,
+        "port": server.port,
+        "url": proxy_url,
+        "local_url": f"http://localhost:{server.port}" if server.status == "running" else None,
+        "error": server.error,
+        "managed": server.managed,
+    }
+
+
 @app.get("/flow/status", tags=["Flow"])
 async def get_flow_status() -> dict:
     """Get the status of the shared Node-RED flow server."""
@@ -1287,9 +1545,115 @@ async def health_check() -> dict:
     }
 
 
+@app.get("/system/status", tags=["System"])
+async def get_system_status() -> dict:
+    """Get system and per-session resource usage."""
+    manager = get_session_manager()
+    sessions = await manager.list_sessions(include_closed=True)
+
+    session_paths = [
+        (session.session_id, os.path.abspath(session.working_directory))
+        for session in sessions
+    ]
+    session_paths.sort(key=lambda item: len(item[1]), reverse=True)
+
+    total_1, idle_1 = _read_proc_stat()
+    proc_snapshot_1 = _collect_session_processes(session_paths)
+    await asyncio.sleep(0.2)
+    total_2, idle_2 = _read_proc_stat()
+    proc_snapshot_2 = _collect_session_processes(session_paths)
+
+    total_delta = max(total_2 - total_1, 1)
+    idle_delta = max(idle_2 - idle_1, 0)
+    total_cpu_percent = round((total_delta - idle_delta) / total_delta * 100, 2)
+
+    mem_total, mem_available = _read_meminfo()
+    mem_used = max(mem_total - mem_available, 0)
+    mem_percent = round((mem_used / mem_total) * 100, 2) if mem_total else 0.0
+
+    base_path = os.path.abspath(get_session_manager().base_workspace_dir)
+    disk_usage = shutil.disk_usage(base_path)
+    disk_used = disk_usage.total - disk_usage.free
+    disk_percent = round((disk_used / disk_usage.total) * 100, 2) if disk_usage.total else 0.0
+
+    session_cpu_ticks: dict[str, int] = {s.session_id: 0 for s in sessions}
+    session_mem_bytes: dict[str, int] = {s.session_id: 0 for s in sessions}
+    session_proc_counts: dict[str, int] = {s.session_id: 0 for s in sessions}
+
+    for pid, info in proc_snapshot_2.items():
+        session_id = info["session_id"]
+        rss = int(info["rss"])
+        session_mem_bytes[session_id] = session_mem_bytes.get(session_id, 0) + rss
+        session_proc_counts[session_id] = session_proc_counts.get(session_id, 0) + 1
+
+    for pid, info_2 in proc_snapshot_2.items():
+        info_1 = proc_snapshot_1.get(pid)
+        if not info_1:
+            continue
+        if info_1["session_id"] != info_2["session_id"]:
+            continue
+        delta_ticks = int(info_2["ticks"]) - int(info_1["ticks"])
+        if delta_ticks > 0:
+            session_cpu_ticks[info_2["session_id"]] = session_cpu_ticks.get(info_2["session_id"], 0) + delta_ticks
+
+    session_items = []
+    for session in sessions:
+        disk_bytes = _get_dir_size(session.working_directory)
+        session_cpu = round((session_cpu_ticks.get(session.session_id, 0) / total_delta) * 100, 2)
+        session_mem = session_mem_bytes.get(session.session_id, 0)
+        session_mem_percent = round((session_mem / mem_total) * 100, 2) if mem_total else 0.0
+        session_disk_percent = round((disk_bytes / disk_usage.total) * 100, 2) if disk_usage.total else 0.0
+        session_items.append({
+            "session_id": session.session_id,
+            "display_name": session.display_name,
+            "status": session.status.value,
+            "cpu_percent": session_cpu,
+            "memory_percent": session_mem_percent,
+            "memory_bytes": session_mem,
+            "disk_percent": session_disk_percent,
+            "disk_bytes": disk_bytes,
+            "process_count": session_proc_counts.get(session.session_id, 0),
+        })
+
+    return {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "total": {
+            "cpu_percent": total_cpu_percent,
+            "memory_percent": mem_percent,
+            "memory_used_bytes": mem_used,
+            "memory_total_bytes": mem_total,
+            "disk_percent": disk_percent,
+            "disk_used_bytes": disk_used,
+            "disk_total_bytes": disk_usage.total,
+        },
+        "sessions": session_items,
+    }
+
+
 # ============================================================================
 # API Prefix Handler (for frontend requests with /api prefix)
 # ============================================================================
+
+API_INTERNAL_PREFIXES = (
+    "sessions",
+    "health",
+    "system",
+    "permissions",
+    "preview",
+    "view",
+    "flow",
+    "docs",
+    "redoc",
+    "openapi.json",
+)
+
+
+def _is_internal_api_path(path: str) -> bool:
+    """Check whether /api/{path} should map to internal app endpoints."""
+    if path == "openapi.json":
+        return True
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in API_INTERNAL_PREFIXES if prefix != "openapi.json")
+
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"], tags=["API"])
 async def api_prefix_handler(path: str, request: Request) -> Response:
@@ -1299,7 +1663,11 @@ async def api_prefix_handler(path: str, request: Request) -> Response:
     Supports both regular and streaming responses.
     """
     # Build internal URL without /api prefix
-    internal_url = f"http://localhost:8000/{path}"
+    if _is_internal_api_path(path):
+        internal_url = f"http://localhost:8000/{path}"
+    else:
+        # Route app-specific APIs to Node-RED httpNodeRoot (/flow/api)
+        internal_url = f"http://localhost:8000/flow/api/{path}"
     
     # Include query string
     if request.url.query:
