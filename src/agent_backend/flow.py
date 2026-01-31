@@ -54,11 +54,21 @@ class FlowManager:
         """Create a minimal settings.js that serves the editor under /flow."""
         settings_path = os.path.join(user_dir, "settings.js")
         if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    existing = f.read()
+                if 'httpNodeRoot: "/flow/api"' in existing:
+                    updated = existing.replace('httpNodeRoot: "/flow/api"', 'httpNodeRoot: "/"')
+                    with open(settings_path, "w", encoding="utf-8") as f:
+                        f.write(updated)
+            except Exception:
+                # Best effort update; keep existing settings if read/write fails.
+                pass
             return
         settings_content = """module.exports = {
   uiPort: process.env.PORT || 1880,
   httpAdminRoot: "/flow",
-  httpNodeRoot: "/flow/api"
+  httpNodeRoot: "/"
 };
 """
         with open(settings_path, "w", encoding="utf-8") as f:

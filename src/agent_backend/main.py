@@ -1669,8 +1669,12 @@ async def api_prefix_handler(path: str, request: Request) -> Response:
     if _is_internal_api_path(path):
         internal_url = f"http://localhost:8000/{path}"
     else:
-        # Route app-specific APIs to Node-RED httpNodeRoot (/flow/api)
-        internal_url = f"http://localhost:8000/flow/api/{path}"
+        # Route app-specific APIs to Node-RED httpNodeRoot ("/")
+        flow_mgr = get_flow_manager()
+        server = await flow_mgr.start_flow()
+        if server.status != "running":
+            raise HTTPException(status_code=503, detail=server.error or "Flow server not running")
+        internal_url = f"http://localhost:{server.port}/api/{path}"
     
     # Include query string
     if request.url.query:

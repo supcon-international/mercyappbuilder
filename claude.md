@@ -86,7 +86,7 @@ NEVER return JSON.parse(stored) directly - old/corrupted data will cause .filter
 
 ## NodeRED (Auto-imported to Node-RED on Build)
 
-NodeRED is the backend of the app, to achieve this, generate a flow.json in the dist folder. This file will be automatically imported to Node-RED when the user clicks "Build" in the View panel.
+NodeRED is the backend of the app, to achieve this, generate a flow.json in the public folder. This file will be automatically imported to Node-RED when the user clicks "Build" in the View panel.
 
 MUST ADD DEBUG Nodes for all FUNCTION NODES
 
@@ -107,9 +107,9 @@ The app must be buildable and the UI should render correctly in the browser with
 
 Seeded mock data initializes on first run so the UI is immediately usable (no blank “dead” app).
 
-UNS.json is generated in dist folder
+UNS.json is generated in public folder
 
-flow.json is generated in dist folder
+flow.json is generated in public folder
 
 ## Build Verification (REQUIRED)
 
